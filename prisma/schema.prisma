@@ -13,8 +13,28 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// A small test model you can push to the database once connectivity from your environment is available.
-model TestTable {
-  id   Int     @id @default(autoincrement())
-  name String?
+// User model for the Flit financial literacy app
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  username  String   @unique
+  firstName String?
+  lastName  String?
+  dateOfBirth DateTime?
+  phoneNumber String?
+  
+  // App-specific fields for the financial literacy game
+  emailVerified Boolean @default(false)
+  phoneVerified Boolean @default(false)
+  onboardingComplete Boolean @default(false)
+  financialIQScore Int @default(0)
+  learningStreak Int @default(0)
+  totalLearningDollars Decimal @default(0.0)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lastLoginAt DateTime?
+  
+  @@map("users")
 }

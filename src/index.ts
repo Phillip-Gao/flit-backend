@@ -24,6 +24,9 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 // API routes
+import apiRoutes from './routes';
+app.use('/api', apiRoutes);
+
 app.get('/api', (req: Request, res: Response) => {
   res.json({ message: 'Flit API' });
 });
