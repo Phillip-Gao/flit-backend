@@ -31,10 +31,168 @@ model User {
   learningStreak Int @default(0)
   totalLearningDollars Decimal @default(0.0)
   
+  // Relationships
+  userLessons UserLesson[]
+  portfolioHoldings PortfolioHolding[]
+  friendships UserFriend[] @relation("User")
+  friendRequestsSent UserFriend[] @relation("Friend")
+  leagueMemberships LeagueMembership[]
+  
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   lastLoginAt DateTime?
   
   @@map("users")
+}
+
+// Lesson system
+model Lesson {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  content     String   // JSON or markdown content
+  category    String   // e.g., "investing", "saving", "budgeting"
+  difficulty  String   // "beginner", "intermediate", "advanced"
+  estimatedTime Int    // minutes
+  rewardDollars Decimal @default(0.0)
+  isActive    Boolean  @default(true)
+  order       Int      @default(0)
+  
+  // Relationships
+  userLessons UserLesson[]
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("lessons")
+}
+
+model UserLesson {
+  id           String    @id @default(cuid())
+  userId       String
+  lessonId     String
+  status       String    // "not_started", "in_progress", "completed"
+  progress     Int       @default(0) // percentage 0-100
+  score        Int?      // quiz score if applicable
+  timeSpent    Int       @default(0) // minutes
+  completedAt  DateTime?
+  
+  // Relationships
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson       Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([userId, lessonId])
+  @@map("user_lessons")
+}
+
+// Portfolio system
+model PortfolioHolding {
+  id               String    @id @default(cuid())
+  userId           String
+  symbol           String    // Stock symbol (e.g., "AAPL", "GOOGL")
+  companyName      String
+  shares           Decimal
+  averageCost      Decimal
+  currentPrice     Decimal   @default(0.0)
+  totalValue       Decimal   @default(0.0)
+  gainLoss         Decimal   @default(0.0)
+  gainLossPercent  Decimal   @default(0.0)
+  isActive         Boolean   @default(true)
+  
+  // Relationships
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions     PortfolioTransaction[]
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([userId, symbol])
+  @@map("portfolio_holdings")
+}
+
+model PortfolioTransaction {
+  id          String    @id @default(cuid())
+  holdingId   String
+  type        String    // "buy", "sell"
+  shares      Decimal
+  price       Decimal
+  totalAmount Decimal
+  fees        Decimal   @default(0.0)
+  notes       String?
+  
+  // Relationships
+  holding     PortfolioHolding @relation(fields: [holdingId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  
+  @@map("portfolio_transactions")
+}
+
+// Social features - Friends and Leagues only
+model UserFriend {
+  id       String @id @default(cuid())
+  userId   String
+  friendId String
+  status   String // "pending", "accepted", "blocked"
+  
+  // Relationships
+  user     User @relation("User", fields: [userId], references: [id], onDelete: Cascade)
+  friend   User @relation("Friend", fields: [friendId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([userId, friendId])
+  @@map("user_friends")
+}
+
+model League {
+  id          String @id @default(cuid())
+  name        String
+  description String?
+  type        String // "beginner", "intermediate", "advanced", "custom"
+  maxMembers  Int    @default(50)
+  isActive    Boolean @default(true)
+  
+  // League rules/criteria (JSON)
+  criteria    String? // e.g., {"minScore": 500, "category": "investing"}
+  
+  // Relationships
+  memberships LeagueMembership[]
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("leagues")
+}
+
+model LeagueMembership {
+  id        String @id @default(cuid())
+  userId    String
+  leagueId  String
+  rank      Int?   // Position in league leaderboard
+  score     Int    @default(0) // League-specific score
+  joinedAt  DateTime @default(now())
+  isActive  Boolean @default(true)
+  
+  // Relationships
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  league    League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([userId, leagueId])
+  @@map("league_memberships")
 }
