@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: flit1234567
       POSTGRES_DB: flit_dev
     ports:
-      - "5433:5432"  # Using 5433 to avoid conflicts with local PostgreSQL
+      - "5432:5432"  # Using standard PostgreSQL port
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
