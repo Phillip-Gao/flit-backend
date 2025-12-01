@@ -222,7 +222,7 @@ model Asset {
   id            String   @id @default(cuid())
   ticker        String   @unique
   name          String
-  type          String // "Stock", "ETF", "Crypto", "Commodity", "REIT"
+  type          String // "Stock", "ETF", "Commodity", "REIT"
   tier          String // "Tier 1", "Tier 2", "Tier 3"
   currentPrice  Decimal
   previousClose Decimal  @default(0.0)

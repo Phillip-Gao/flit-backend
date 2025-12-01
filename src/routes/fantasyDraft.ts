@@ -83,7 +83,20 @@ router.get('/:leagueId/draft', async (req, res) => {
       return res.status(404).json({ error: 'Draft not found' });
     }
 
-    res.json(draftState);
+    // Format picks with converted asset prices
+    const formatted = {
+      ...draftState,
+      picks: draftState.picks.map((pick: any) => ({
+        ...pick,
+        asset: pick.asset ? {
+          ...pick.asset,
+          currentPrice: parseFloat(pick.asset.currentPrice),
+          previousClose: parseFloat(pick.asset.previousClose),
+        } : null,
+      })),
+    };
+
+    res.json(formatted);
   } catch (error) {
     console.error('Error fetching draft state:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -313,7 +326,17 @@ router.get('/:leagueId/draft/assets', async (req, res) => {
       take: 100,
     });
 
-    res.json({ assets });
+    // Convert Decimal strings to numbers for frontend
+    const formatted = assets.map((asset: any) => ({
+      ...asset,
+      currentPrice: parseFloat(asset.currentPrice),
+      previousClose: parseFloat(asset.previousClose),
+      changePercent: parseFloat(asset.previousClose) > 0
+        ? ((parseFloat(asset.currentPrice) - parseFloat(asset.previousClose)) / parseFloat(asset.previousClose)) * 100
+        : 0,
+    }));
+
+    res.json({ assets: formatted });
   } catch (error) {
     console.error('Error fetching draft assets:', error);
     res.status(500).json({ error: 'Internal server error' });

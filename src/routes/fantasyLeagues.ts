@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../services/prisma';
+import fantasyDraftRoutes from './fantasyDraft';
 
 const router = Router();
 
@@ -17,7 +18,7 @@ const createLeagueSchema = z.object({
     activeSlots: z.number().int().min(3).max(20),
     benchSlots: z.number().int().min(2).max(10),
     scoringMethod: z.enum(['Total Return %', 'Absolute Gain $']),
-    enabledAssetClasses: z.array(z.enum(['Stock', 'ETF', 'Crypto', 'Commodity', 'REIT'])),
+    enabledAssetClasses: z.array(z.enum(['Stock', 'ETF', 'Commodity', 'REIT'])),
     minAssetPrice: z.number().min(0),
     draftType: z.enum(['Snake', 'Auction']),
     draftTimePerPick: z.number().int().min(30).max(300),
@@ -80,6 +81,11 @@ router.get('/', async (req, res) => {
       settings: league.settings ? JSON.parse(league.settings) : null,
       criteria: league.criteria ? JSON.parse(league.criteria) : null,
       memberCount: league._count.memberships,
+      members: league.memberships.map((m: any) => m.user),
+      status: league.draftState?.status === 'completed' ? 'active' :
+              league.draftState?.status === 'active' ? 'drafting' :
+              'pre-draft',
+      currentWeek: 0, // TODO: Calculate based on league start date and current date
     }));
 
     res.json({ leagues: formatted });
@@ -149,6 +155,11 @@ router.get('/:id', async (req, res) => {
       ...league,
       settings: league.settings ? JSON.parse(league.settings) : null,
       criteria: league.criteria ? JSON.parse(league.criteria) : null,
+      members: league.memberships.map((m: any) => m.user),
+      status: league.draftState?.status === 'completed' ? 'active' :
+              league.draftState?.status === 'active' ? 'drafting' :
+              'pre-draft',
+      currentWeek: 0, // TODO: Calculate based on league start date and current date
     };
 
     res.json(formatted);
@@ -255,5 +266,8 @@ router.post('/:id/join', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// Mount draft routes under fantasy-leagues
+router.use('/', fantasyDraftRoutes);
 
 export default router;

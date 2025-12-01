@@ -56,7 +56,21 @@ router.get('/:leagueId/portfolio', async (req, res) => {
       return res.status(404).json({ error: 'Portfolio not found' });
     }
 
-    res.json(portfolio);
+    // Convert Decimal strings to numbers in asset prices
+    const formatted = {
+      ...portfolio,
+      slots: portfolio.slots.map((slot: any) => ({
+        ...slot,
+        asset: slot.asset ? {
+          ...slot.asset,
+          currentPrice: parseFloat(slot.asset.currentPrice),
+          previousClose: parseFloat(slot.asset.previousClose),
+        } : null,
+        purchasePrice: parseFloat(slot.purchasePrice),
+      })),
+    };
+
+    res.json(formatted);
   } catch (error) {
     console.error('Error fetching portfolio:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -131,7 +145,21 @@ router.put('/portfolios/:id/lineup', async (req, res) => {
       },
     });
 
-    res.json(updated);
+    // Convert Decimal strings to numbers in asset prices
+    const formatted = updated ? {
+      ...updated,
+      slots: updated.slots.map((slot: any) => ({
+        ...slot,
+        asset: slot.asset ? {
+          ...slot.asset,
+          currentPrice: parseFloat(slot.asset.currentPrice),
+          previousClose: parseFloat(slot.asset.previousClose),
+        } : null,
+        purchasePrice: parseFloat(slot.purchasePrice),
+      })),
+    } : null;
+
+    res.json(formatted);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.issues });
@@ -409,7 +437,14 @@ router.get('/assets/:id', async (req, res) => {
       return res.status(404).json({ error: 'Asset not found' });
     }
 
-    res.json(asset);
+    // Convert Decimal strings to numbers
+    const formatted = {
+      ...asset,
+      currentPrice: parseFloat(asset.currentPrice as any),
+      previousClose: parseFloat(asset.previousClose as any),
+    };
+
+    res.json(formatted);
   } catch (error) {
     console.error('Error fetching asset:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -464,7 +499,17 @@ router.get('/:leagueId/market/assets', async (req, res) => {
       take: 100,
     });
 
-    res.json({ assets });
+    // Convert Decimal strings to numbers
+    const formatted = assets.map((asset: any) => ({
+      ...asset,
+      currentPrice: parseFloat(asset.currentPrice),
+      previousClose: parseFloat(asset.previousClose),
+      changePercent: parseFloat(asset.previousClose) > 0
+        ? ((parseFloat(asset.currentPrice) - parseFloat(asset.previousClose)) / parseFloat(asset.previousClose)) * 100
+        : 0,
+    }));
+
+    res.json({ assets: formatted });
   } catch (error) {
     console.error('Error fetching market assets:', error);
     res.status(500).json({ error: 'Internal server error' });
