@@ -1,0 +1,259 @@
+import { Router } from 'express';
+import { z } from 'zod';
+import prisma from '../services/prisma';
+
+const router = Router();
+
+// Validation schemas
+const createLeagueSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().optional(),
+  adminUserId: z.string(),
+  settings: z.object({
+    leagueSize: z.number().int().min(2).max(20),
+    seasonLength: z.number().int().min(1).max(52),
+    draftDate: z.string().datetime(),
+    portfolioSize: z.number().int().min(5).max(30),
+    activeSlots: z.number().int().min(3).max(20),
+    benchSlots: z.number().int().min(2).max(10),
+    scoringMethod: z.enum(['Total Return %', 'Absolute Gain $']),
+    enabledAssetClasses: z.array(z.enum(['Stock', 'ETF', 'Crypto', 'Commodity', 'REIT'])),
+    minAssetPrice: z.number().min(0),
+    draftType: z.enum(['Snake', 'Auction']),
+    draftTimePerPick: z.number().int().min(30).max(300),
+    matchupType: z.enum(['Head-to-head', 'Rotisserie']),
+    playoffsEnabled: z.boolean(),
+    tradeDeadlineWeek: z.number().int().min(1),
+    waiverPriority: z.enum(['Rolling', 'Reverse Standings']),
+  }),
+});
+
+// GET /api/fantasy-leagues - List leagues for current user
+router.get('/', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const leagues = await prisma.league.findMany({
+      where: {
+        OR: [
+          { adminUserId: userId as string },
+          { memberships: { some: { userId: userId as string } } },
+        ],
+      },
+      include: {
+        admin: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        memberships: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
+        draftState: true,
+        _count: {
+          select: {
+            memberships: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const formatted = leagues.map((league: any) => ({
+      ...league,
+      settings: league.settings ? JSON.parse(league.settings) : null,
+      criteria: league.criteria ? JSON.parse(league.criteria) : null,
+      memberCount: league._count.memberships,
+    }));
+
+    res.json({ leagues: formatted });
+  } catch (error) {
+    console.error('Error fetching leagues:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/fantasy-leagues/:id - Get detailed league info
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const league = await prisma.league.findUnique({
+      where: { id },
+      include: {
+        admin: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        memberships: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+          orderBy: { score: 'desc' },
+        },
+        draftState: {
+          include: {
+            picks: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    username: true,
+                  },
+                },
+                asset: true,
+              },
+              orderBy: [{ round: 'asc' }, { pickNumber: 'asc' }],
+            },
+          },
+        },
+        matchups: {
+          orderBy: { week: 'desc' },
+          take: 10,
+        },
+      },
+    });
+
+    if (!league) {
+      return res.status(404).json({ error: 'League not found' });
+    }
+
+    const formatted = {
+      ...league,
+      settings: league.settings ? JSON.parse(league.settings) : null,
+      criteria: league.criteria ? JSON.parse(league.criteria) : null,
+    };
+
+    res.json(formatted);
+  } catch (error) {
+    console.error('Error fetching league:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/fantasy-leagues - Create a new league
+router.post('/', async (req, res) => {
+  try {
+    const validated = createLeagueSchema.parse(req.body);
+
+    const league = await prisma.league.create({
+      data: {
+        name: validated.name,
+        description: validated.description,
+        adminUserId: validated.adminUserId,
+        type: 'custom',
+        maxMembers: validated.settings.leagueSize,
+        settings: JSON.stringify(validated.settings),
+      },
+      include: {
+        admin: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    // Auto-add admin as first member
+    await prisma.leagueMembership.create({
+      data: {
+        leagueId: league.id,
+        userId: validated.adminUserId,
+      },
+    });
+
+    // Create draft state
+    await prisma.draftState.create({
+      data: {
+        leagueId: league.id,
+        status: 'pending',
+      },
+    });
+
+    const formatted = {
+      ...league,
+      settings: JSON.parse(league.settings || '{}'),
+    };
+
+    res.status(201).json(formatted);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid input', details: error.issues });
+    }
+    console.error('Error creating league:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/fantasy-leagues/:id/join - Join a league
+router.post('/:id/join', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const league = await prisma.league.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: { memberships: true },
+        },
+      },
+    });
+
+    if (!league) {
+      return res.status(404).json({ error: 'League not found' });
+    }
+
+    if (league._count.memberships >= league.maxMembers) {
+      return res.status(400).json({ error: 'League is full' });
+    }
+
+    const membership = await prisma.leagueMembership.create({
+      data: {
+        leagueId: id,
+        userId,
+      },
+    });
+
+    res.status(201).json(membership);
+  } catch (error) {
+    console.error('Error joining league:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+export default router;

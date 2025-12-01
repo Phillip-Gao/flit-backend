@@ -15,124 +15,134 @@ datasource db {
 
 // User model for the Flit financial literacy app
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  username  String   @unique
-  firstName String?
-  lastName  String?
+  id          String    @id @default(cuid())
+  email       String    @unique
+  username    String    @unique
+  firstName   String?
+  lastName    String?
   dateOfBirth DateTime?
   phoneNumber String?
-  
+
   // App-specific fields for the financial literacy game
-  emailVerified Boolean @default(false)
-  phoneVerified Boolean @default(false)
-  onboardingComplete Boolean @default(false)
-  financialIQScore Int @default(0)
-  learningStreak Int @default(0)
+  emailVerified        Boolean @default(false)
+  phoneVerified        Boolean @default(false)
+  onboardingComplete   Boolean @default(false)
+  financialIQScore     Int     @default(0)
+  learningStreak       Int     @default(0)
   totalLearningDollars Decimal @default(0.0)
-  
+
+  // Fantasy Finance - Completed lessons for asset gating
+  completedLessons String[] @default([])
+
   // Relationships
-  userLessons UserLesson[]
-  portfolioHoldings PortfolioHolding[]
-  friendships UserFriend[] @relation("User")
-  friendRequestsSent UserFriend[] @relation("Friend")
-  leagueMemberships LeagueMembership[]
-  
+  userLessons        UserLesson[]
+  portfolioHoldings  PortfolioHolding[]
+  friendships        UserFriend[]       @relation("User")
+  friendRequestsSent UserFriend[]       @relation("Friend")
+  leagueMemberships  LeagueMembership[]
+  adminLeagues       League[]           @relation("LeagueAdmin")
+  fantasyPortfolios  FantasyPortfolio[]
+  draftPicks         DraftPick[]
+  trades             Trade[]            @relation("TradeCreator")
+  tradeRecipients    Trade[]            @relation("TradeRecipient")
+  waiverClaims       WaiverClaim[]
+  notifications      Notification[]
+
   // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   lastLoginAt DateTime?
-  
+
   @@map("users")
 }
 
 // Lesson system
 model Lesson {
-  id          String   @id @default(cuid())
-  title       String
-  description String?
-  content     String   // JSON or markdown content
-  category    String   // e.g., "investing", "saving", "budgeting"
-  difficulty  String   // "beginner", "intermediate", "advanced"
-  estimatedTime Int    // minutes
+  id            String  @id @default(cuid())
+  title         String
+  description   String?
+  content       String // JSON or markdown content
+  category      String // e.g., "investing", "saving", "budgeting"
+  difficulty    String // "beginner", "intermediate", "advanced"
+  estimatedTime Int // minutes
   rewardDollars Decimal @default(0.0)
-  isActive    Boolean  @default(true)
-  order       Int      @default(0)
-  
+  isActive      Boolean @default(true)
+  order         Int     @default(0)
+
   // Relationships
   userLessons UserLesson[]
-  
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@map("lessons")
 }
 
 model UserLesson {
-  id           String    @id @default(cuid())
-  userId       String
-  lessonId     String
-  status       String    // "not_started", "in_progress", "completed"
-  progress     Int       @default(0) // percentage 0-100
-  score        Int?      // quiz score if applicable
-  timeSpent    Int       @default(0) // minutes
-  completedAt  DateTime?
-  
+  id          String    @id @default(cuid())
+  userId      String
+  lessonId    String
+  status      String // "not_started", "in_progress", "completed"
+  progress    Int       @default(0) // percentage 0-100
+  score       Int? // quiz score if applicable
+  timeSpent   Int       @default(0) // minutes
+  completedAt DateTime?
+
   // Relationships
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lesson       Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@unique([userId, lessonId])
   @@map("user_lessons")
 }
 
 // Portfolio system
 model PortfolioHolding {
-  id               String    @id @default(cuid())
-  userId           String
-  symbol           String    // Stock symbol (e.g., "AAPL", "GOOGL")
-  companyName      String
-  shares           Decimal
-  averageCost      Decimal
-  currentPrice     Decimal   @default(0.0)
-  totalValue       Decimal   @default(0.0)
-  gainLoss         Decimal   @default(0.0)
-  gainLossPercent  Decimal   @default(0.0)
-  isActive         Boolean   @default(true)
-  
+  id              String  @id @default(cuid())
+  userId          String
+  symbol          String // Stock symbol (e.g., "AAPL", "GOOGL")
+  companyName     String
+  shares          Decimal
+  averageCost     Decimal
+  currentPrice    Decimal @default(0.0)
+  totalValue      Decimal @default(0.0)
+  gainLoss        Decimal @default(0.0)
+  gainLossPercent Decimal @default(0.0)
+  isActive        Boolean @default(true)
+
   // Relationships
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions     PortfolioTransaction[]
-  
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions PortfolioTransaction[]
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@unique([userId, symbol])
   @@map("portfolio_holdings")
 }
 
 model PortfolioTransaction {
-  id          String    @id @default(cuid())
+  id          String  @id @default(cuid())
   holdingId   String
-  type        String    // "buy", "sell"
+  type        String // "buy", "sell"
   shares      Decimal
   price       Decimal
   totalAmount Decimal
-  fees        Decimal   @default(0.0)
+  fees        Decimal @default(0.0)
   notes       String?
-  
+
   // Relationships
-  holding     PortfolioHolding @relation(fields: [holdingId], references: [id], onDelete: Cascade)
-  
+  holding PortfolioHolding @relation(fields: [holdingId], references: [id], onDelete: Cascade)
+
   // Timestamps
   createdAt DateTime @default(now())
-  
+
   @@map("portfolio_transactions")
 }
 
@@ -142,57 +152,271 @@ model UserFriend {
   userId   String
   friendId String
   status   String // "pending", "accepted", "blocked"
-  
+
   // Relationships
-  user     User @relation("User", fields: [userId], references: [id], onDelete: Cascade)
-  friend   User @relation("Friend", fields: [friendId], references: [id], onDelete: Cascade)
-  
+  user   User @relation("User", fields: [userId], references: [id], onDelete: Cascade)
+  friend User @relation("Friend", fields: [friendId], references: [id], onDelete: Cascade)
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@unique([userId, friendId])
   @@map("user_friends")
 }
 
 model League {
-  id          String @id @default(cuid())
+  id          String  @id @default(cuid())
   name        String
   description String?
+  adminUserId String
   type        String // "beginner", "intermediate", "advanced", "custom"
-  maxMembers  Int    @default(50)
+  maxMembers  Int     @default(50)
   isActive    Boolean @default(true)
-  
+
+  // Fantasy Finance Settings (JSON stringified object)
+  settings String? // Contains: leagueSize, seasonLength, draftDate, portfolioSize, activeSlots, benchSlots, scoringMethod, enabledAssetClasses, minAssetPrice, draftType, draftTimePerPick, matchupType, playoffsEnabled, tradeDeadlineWeek, waiverPriority
+
   // League rules/criteria (JSON)
-  criteria    String? // e.g., {"minScore": 500, "category": "investing"}
-  
+  criteria String? // e.g., {"minScore": 500, "category": "investing"}
+
   // Relationships
-  memberships LeagueMembership[]
-  
+  admin        User               @relation("LeagueAdmin", fields: [adminUserId], references: [id], onDelete: Cascade)
+  memberships  LeagueMembership[]
+  draftState   DraftState?
+  portfolios   FantasyPortfolio[]
+  matchups     Matchup[]
+  trades       Trade[]
+  waiverClaims WaiverClaim[]
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@map("leagues")
 }
 
 model LeagueMembership {
-  id        String @id @default(cuid())
-  userId    String
-  leagueId  String
-  rank      Int?   // Position in league leaderboard
-  score     Int    @default(0) // League-specific score
-  joinedAt  DateTime @default(now())
-  isActive  Boolean @default(true)
-  
+  id       String   @id @default(cuid())
+  userId   String
+  leagueId String
+  rank     Int? // Position in league leaderboard
+  score    Int      @default(0) // League-specific score
+  joinedAt DateTime @default(now())
+  isActive Boolean  @default(true)
+
   // Relationships
-  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  league    League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@unique([userId, leagueId])
   @@map("league_memberships")
+}
+
+// Fantasy Finance - Asset model
+model Asset {
+  id            String   @id @default(cuid())
+  ticker        String   @unique
+  name          String
+  type          String // "Stock", "ETF", "Crypto", "Commodity", "REIT"
+  tier          String // "Tier 1", "Tier 2", "Tier 3"
+  currentPrice  Decimal
+  previousClose Decimal  @default(0.0)
+  marketCap     Decimal?
+  sector        String?
+  isActive      Boolean  @default(true)
+
+  // Lesson gating - required lessons to trade/draft this asset
+  requiredLessons String[] @default([])
+
+  // Relationships
+  portfolioSlots PortfolioSlot[]
+  draftPicks     DraftPick[]
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("assets")
+}
+
+// Fantasy Finance - Portfolio model (replaces old PortfolioHolding for leagues)
+model FantasyPortfolio {
+  id                    String  @id @default(cuid())
+  leagueId              String
+  userId                String
+  totalValue            Decimal @default(0.0)
+  weeklyGainLoss        Decimal @default(0.0)
+  weeklyGainLossPercent Decimal @default(0.0)
+
+  // Relationships
+  league League          @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slots  PortfolioSlot[]
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([leagueId, userId])
+  @@map("fantasy_portfolios")
+}
+
+model PortfolioSlot {
+  id              String   @id @default(cuid())
+  portfolioId     String
+  assetId         String
+  status          String // "ACTIVE", "BENCH"
+  purchasePrice   Decimal
+  currentValue    Decimal  @default(0.0)
+  gainLoss        Decimal  @default(0.0)
+  gainLossPercent Decimal  @default(0.0)
+  acquiredAt      DateTime @default(now())
+
+  // Relationships
+  portfolio FantasyPortfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  asset     Asset            @relation(fields: [assetId], references: [id])
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("portfolio_slots")
+}
+
+// Fantasy Finance - Draft State
+model DraftState {
+  id                   String    @id @default(cuid())
+  leagueId             String    @unique
+  status               String // "pending", "active", "paused", "completed"
+  currentRound         Int       @default(1)
+  currentPickNumber    Int       @default(1)
+  currentUserId        String?
+  remainingTimeSeconds Int       @default(0)
+  timerStartedAt       DateTime?
+
+  // Relationships
+  league League      @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  picks  DraftPick[]
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("draft_states")
+}
+
+model DraftPick {
+  id           String   @id @default(cuid())
+  draftStateId String
+  round        Int
+  pickNumber   Int
+  userId       String
+  assetId      String
+  pickTime     DateTime @default(now())
+  isAutoPick   Boolean  @default(false)
+
+  // Relationships
+  draftState DraftState @relation(fields: [draftStateId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id])
+  asset      Asset      @relation(fields: [assetId], references: [id])
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@unique([draftStateId, round, pickNumber])
+  @@map("draft_picks")
+}
+
+// Fantasy Finance - Matchups
+model Matchup {
+  id         String  @id @default(cuid())
+  leagueId   String
+  week       Int
+  user1Id    String
+  user2Id    String? // null for rotisserie or bye weeks
+  user1Score Decimal @default(0.0)
+  user2Score Decimal @default(0.0)
+  winnerId   String?
+  status     String // "pending", "active", "completed"
+
+  // Relationships
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([leagueId, week, user1Id])
+  @@map("matchups")
+}
+
+// Fantasy Finance - Trades
+model Trade {
+  id                String    @id @default(cuid())
+  leagueId          String
+  creatorId         String
+  recipientId       String
+  offeredAssetIds   String[] // Array of asset IDs
+  requestedAssetIds String[] // Array of asset IDs
+  status            String // "pending", "accepted", "rejected", "cancelled"
+  respondedAt       DateTime?
+
+  // Relationships
+  league    League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  creator   User   @relation("TradeCreator", fields: [creatorId], references: [id])
+  recipient User   @relation("TradeRecipient", fields: [recipientId], references: [id])
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("trades")
+}
+
+// Fantasy Finance - Waiver Claims
+model WaiverClaim {
+  id            String    @id @default(cuid())
+  leagueId      String
+  userId        String
+  assetId       String
+  dropAssetId   String? // Asset to drop (optional)
+  priority      Int
+  status        String // "pending", "processed", "failed"
+  processedAt   DateTime?
+  failureReason String?
+
+  // Relationships
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("waiver_claims")
+}
+
+// Fantasy Finance - Notifications
+model Notification {
+  id      String  @id @default(cuid())
+  userId  String
+  type    String // "draft_pick", "trade_proposal", "trade_accepted", "matchup_result", etc.
+  title   String
+  message String
+  data    String? // JSON data for the notification
+  isRead  Boolean @default(false)
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("notifications")
 }
