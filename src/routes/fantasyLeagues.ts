@@ -12,20 +12,14 @@ const createLeagueSchema = z.object({
   adminUserId: z.string(),
   settings: z.object({
     leagueSize: z.number().int().min(2).max(20),
-    seasonLength: z.number().int().min(1).max(52),
-    draftDate: z.string().datetime(),
-    portfolioSize: z.number().int().min(5).max(30),
-    activeSlots: z.number().int().min(3).max(20),
-    benchSlots: z.number().int().min(2).max(10),
+    startingBalance: z.number().min(1000).max(1000000).default(10000),
+    competitionPeriod: z.enum(['1_week', '2_weeks', '1_month', '3_months', '6_months', '1_year']),
+    startDate: z.string().datetime(),
     scoringMethod: z.enum(['Total Return %', 'Absolute Gain $']),
     enabledAssetClasses: z.array(z.enum(['Stock', 'ETF', 'Commodity', 'REIT'])),
-    minAssetPrice: z.number().min(0),
-    draftType: z.enum(['Snake', 'Auction']),
-    draftTimePerPick: z.number().int().min(30).max(300),
-    matchupType: z.enum(['Head-to-head', 'Rotisserie']),
-    playoffsEnabled: z.boolean(),
-    tradeDeadlineWeek: z.number().int().min(1),
-    waiverPriority: z.enum(['Rolling', 'Reverse Standings']),
+    minAssetPrice: z.number().min(0).default(1),
+    allowShortSelling: z.boolean().default(false),
+    tradingEnabled: z.boolean().default(true),
   }),
 });
 
@@ -203,11 +197,12 @@ router.post('/', async (req, res) => {
       },
     });
 
-    // Create draft state
-    await prisma.draftState.create({
+    // Create portfolio for admin with starting balance
+    await prisma.fantasyPortfolio.create({
       data: {
         leagueId: league.id,
-        status: 'pending',
+        userId: validated.adminUserId,
+        cashBalance: validated.settings.startingBalance,
       },
     });
 
@@ -253,10 +248,38 @@ router.post('/:id/join', async (req, res) => {
       return res.status(400).json({ error: 'League is full' });
     }
 
+    // Check if user is already a member
+    const existingMembership = await prisma.leagueMembership.findUnique({
+      where: {
+        userId_leagueId: {
+          userId,
+          leagueId: id,
+        },
+      },
+    });
+
+    if (existingMembership) {
+      return res.status(400).json({ error: 'Already a member of this league' });
+    }
+
+    // Create membership
     const membership = await prisma.leagueMembership.create({
       data: {
         leagueId: id,
         userId,
+      },
+    });
+
+    // Get league settings to determine starting balance
+    const settings = league.settings ? JSON.parse(league.settings) : {};
+    const startingBalance = settings.startingBalance || 10000;
+
+    // Create portfolio with starting balance
+    await prisma.fantasyPortfolio.create({
+      data: {
+        leagueId: id,
+        userId,
+        cashBalance: startingBalance,
       },
     });
 

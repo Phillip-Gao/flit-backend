@@ -249,8 +249,10 @@ router.post('/:leagueId/draft/pick', async (req, res) => {
             data: {
               portfolioId: portfolio.id,
               assetId: draftPick.assetId,
+              shares: 1, // Each draft pick gives 1 share
+              averageCost: asset?.currentPrice || 0,
+              currentPrice: asset?.currentPrice || 0,
               status: i < settings.activeSlots ? 'ACTIVE' : 'BENCH',
-              purchasePrice: asset?.currentPrice || 0,
             },
           });
         }

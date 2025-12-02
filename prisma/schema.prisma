@@ -249,14 +249,16 @@ model FantasyPortfolio {
   id                    String  @id @default(cuid())
   leagueId              String
   userId                String
+  cashBalance           Decimal @default(0.0)
   totalValue            Decimal @default(0.0)
   weeklyGainLoss        Decimal @default(0.0)
   weeklyGainLossPercent Decimal @default(0.0)
 
   // Relationships
-  league League          @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  slots  PortfolioSlot[]
+  league       League                      @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user         User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slots        PortfolioSlot[]
+  transactions FantasyPortfolioTransaction[]
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -270,11 +272,13 @@ model PortfolioSlot {
   id              String   @id @default(cuid())
   portfolioId     String
   assetId         String
-  status          String // "ACTIVE", "BENCH"
-  purchasePrice   Decimal
-  currentValue    Decimal  @default(0.0)
+  shares          Decimal  @default(0.0) // Number of shares owned
+  averageCost     Decimal // Average cost per share
+  currentPrice    Decimal  @default(0.0)
+  totalValue      Decimal  @default(0.0)
   gainLoss        Decimal  @default(0.0)
   gainLossPercent Decimal  @default(0.0)
+  status          String?  // Optional: "ACTIVE", "BENCH" (for draft leagues if needed)
   acquiredAt      DateTime @default(now())
 
   // Relationships
@@ -285,6 +289,7 @@ model PortfolioSlot {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([portfolioId, assetId])
   @@map("portfolio_slots")
 }
 
@@ -419,4 +424,25 @@ model Notification {
   updatedAt DateTime @updatedAt
 
   @@map("notifications")
+}
+
+// Fantasy Finance - Portfolio Transactions (Buy/Sell)
+model FantasyPortfolioTransaction {
+  id          String   @id @default(cuid())
+  portfolioId String
+  assetId     String
+  type        String // "buy", "sell"
+  shares      Decimal
+  pricePerShare Decimal
+  totalAmount Decimal // shares * pricePerShare
+  cashBefore  Decimal
+  cashAfter   Decimal
+
+  // Relationships
+  portfolio FantasyPortfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@map("fantasy_portfolio_transactions")
 }
