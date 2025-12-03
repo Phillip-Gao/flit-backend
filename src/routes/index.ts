@@ -5,6 +5,7 @@ import portfolioRoutes from './portfolio';
 import socialRoutes from './social';
 import fantasyLeaguesRoutes from './fantasyLeagues';
 import fantasyFeaturesRoutes from './fantasyFeatures';
+import fantasyTradingRoutes from './fantasyTrading';
 
 const router = Router();
 
@@ -14,13 +15,14 @@ router.use('/users', userRoutes);
 // Lesson management routes
 router.use('/lessons', lessonRoutes);
 
-// Portfolio management routes (legacy)
+// Portfolio management routes (personal portfolios)
 router.use('/portfolio', portfolioRoutes);
 
 // Social features routes
 router.use('/social', socialRoutes);
 
 // Fantasy Finance routes
+router.use('/fantasy-leagues', fantasyTradingRoutes);
 router.use('/fantasy-leagues', fantasyLeaguesRoutes);
 router.use('/fantasy', fantasyFeaturesRoutes);
 
