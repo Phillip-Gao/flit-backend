@@ -173,6 +173,7 @@ model League {
   type        String // "beginner", "intermediate", "advanced", "custom"
   maxMembers  Int     @default(50)
   isActive    Boolean @default(true)
+  joinCode    String? @unique // 6-character alphanumeric code for joining
 
   // Fantasy Finance Settings (JSON stringified object)
   settings String? // Contains: leagueSize, seasonLength, draftDate, portfolioSize, activeSlots, benchSlots, scoringMethod, enabledAssetClasses, minAssetPrice, draftType, draftTimePerPick, matchupType, playoffsEnabled, tradeDeadlineWeek, waiverPriority
