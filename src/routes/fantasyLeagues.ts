@@ -459,6 +459,177 @@ router.post('/:id/start', async (req, res) => {
   }
 });
 
+// DELETE /api/fantasy-leagues/:id/leave - Leave a league
+router.delete('/:id/leave', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const league = await prisma.league.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: { memberships: true },
+        },
+        memberships: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+              },
+            },
+          },
+          orderBy: { joinedAt: 'asc' },
+        },
+      },
+    });
+
+    if (!league) {
+      return res.status(404).json({ error: 'League not found' });
+    }
+
+    // Check if user is the admin
+    const isAdmin = league.adminUserId === userId;
+
+    // Check if user is a member (admin might not have a membership if they haven't joined)
+    const membership = await prisma.leagueMembership.findUnique({
+      where: {
+        userId_leagueId: {
+          userId,
+          leagueId: id,
+        },
+      },
+    });
+
+    // If user is admin, delete the entire league
+    if (isAdmin) {
+      // Delete all member portfolios
+      await prisma.portfolioSlot.deleteMany({
+        where: {
+          portfolio: {
+            leagueId: id,
+          },
+        },
+      });
+
+      await prisma.fantasyPortfolio.deleteMany({
+        where: { leagueId: id },
+      });
+
+      // Delete all memberships
+      await prisma.leagueMembership.deleteMany({
+        where: { leagueId: id },
+      });
+
+      // Delete all related data
+      await prisma.draftPick.deleteMany({
+        where: {
+          draftState: {
+            leagueId: id,
+          },
+        },
+      });
+
+      await prisma.draftState.deleteMany({
+        where: { leagueId: id },
+      });
+
+      await prisma.matchup.deleteMany({
+        where: { leagueId: id },
+      });
+
+      await prisma.league.delete({
+        where: { id },
+      });
+
+      return res.json({
+        message: 'League deleted successfully (admin left).',
+        leagueDeleted: true,
+      });
+    }
+
+    // User is not admin, just a regular member
+    if (!membership) {
+      return res.status(404).json({ error: 'Not a member of this league' });
+    }
+
+    // Delete user's portfolio for this league
+    await prisma.fantasyPortfolio.deleteMany({
+      where: {
+        leagueId: id,
+        userId,
+      },
+    });
+
+    // Delete user's portfolio slots (cascade should handle this, but being explicit)
+    await prisma.portfolioSlot.deleteMany({
+      where: {
+        portfolio: {
+          leagueId: id,
+          userId,
+        },
+      },
+    });
+
+    // Delete the membership
+    await prisma.leagueMembership.delete({
+      where: {
+        userId_leagueId: {
+          userId,
+          leagueId: id,
+        },
+      },
+    });
+
+    // Check if there are any remaining members
+    const remainingMembers = await prisma.leagueMembership.count({
+      where: { leagueId: id },
+    });
+
+    // If no members remain, delete the league
+    if (remainingMembers === 0) {
+      // Delete all related data
+      await prisma.draftPick.deleteMany({
+        where: {
+          draftState: {
+            leagueId: id,
+          },
+        },
+      });
+
+      await prisma.draftState.deleteMany({
+        where: { leagueId: id },
+      });
+
+      await prisma.matchup.deleteMany({
+        where: { leagueId: id },
+      });
+
+      await prisma.league.delete({
+        where: { id },
+      });
+
+      return res.json({
+        message: 'Left league successfully. League deleted as no members remain.',
+        leagueDeleted: true,
+      });
+    }
+
+    res.json({
+      message: 'Left league successfully',
+      leagueDeleted: false,
+    });
+  } catch (error) {
+    console.error('Error leaving league:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Mount draft routes under fantasy-leagues
 router.use('/', fantasyDraftRoutes);
 
