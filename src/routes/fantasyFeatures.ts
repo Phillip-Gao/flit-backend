@@ -10,12 +10,15 @@ const updateLineupSchema = z.object({
   benchSlotIds: z.array(z.string()),
 });
 
+// Player-to-player trading is currently disabled
+/*
 const createTradeSchema = z.object({
   creatorId: z.string(),
   recipientId: z.string(),
   offeredAssetIds: z.array(z.string()),
   requestedAssetIds: z.array(z.string()),
 });
+*/
 
 const createWaiverClaimSchema = z.object({
   userId: z.string(),
@@ -232,7 +235,10 @@ router.get('/:leagueId/matchup/week/:week', async (req, res) => {
 });
 
 // ============ TRADE ENDPOINTS ============
+// NOTE: Player-to-player trading is currently disabled.
+// Players can buy/sell assets directly via the trading endpoints in fantasyTrading.ts
 
+/*
 // GET /api/fantasy-leagues/:leagueId/trades - List active trades
 router.get('/:leagueId/trades', async (req, res) => {
   try {
@@ -379,6 +385,7 @@ router.post('/trades/:id/cancel', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+*/
 
 // ============ WAIVER ENDPOINTS ============
 
