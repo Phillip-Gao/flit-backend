@@ -297,6 +297,30 @@ router.post('/:id/join', async (req, res) => {
       return res.status(400).json({ error: 'League is full' });
     }
 
+    // Get user to check learning dollars
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { learningDollarsEarned: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Get league settings to check starting balance
+    const settings = league.settings ? JSON.parse(league.settings) : {};
+    const startingBalance = settings.startingBalance || 10000;
+
+    // Validate user has enough learning dollars
+    if (user.learningDollarsEarned < startingBalance) {
+      return res.status(403).json({ 
+        error: 'Insufficient learning dollars',
+        message: `You need at least $${startingBalance} in learning dollars to join this league. You currently have $${user.learningDollarsEarned}.`,
+        required: startingBalance,
+        available: user.learningDollarsEarned
+      });
+    }
+
     // Check if user is already a member
     const existingMembership = await prisma.leagueMembership.findUnique({
       where: {
@@ -318,10 +342,6 @@ router.post('/:id/join', async (req, res) => {
         userId,
       },
     });
-
-    // Get league settings to determine starting balance
-    const settings = league.settings ? JSON.parse(league.settings) : {};
-    const startingBalance = settings.startingBalance || 10000;
 
     // Create portfolio with starting balance
     await prisma.fantasyPortfolio.create({
@@ -366,6 +386,30 @@ router.post('/join-by-code', async (req, res) => {
       return res.status(400).json({ error: 'League is full' });
     }
 
+    // Get user to check learning dollars
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { learningDollarsEarned: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Get league settings to check starting balance
+    const settings = league.settings ? JSON.parse(league.settings) : {};
+    const startingBalance = settings.startingBalance || 10000;
+
+    // Validate user has enough learning dollars
+    if (user.learningDollarsEarned < startingBalance) {
+      return res.status(403).json({ 
+        error: 'Insufficient learning dollars',
+        message: `You need at least $${startingBalance} in learning dollars to join this league. You currently have $${user.learningDollarsEarned}. Complete more lessons to earn learning dollars!`,
+        required: startingBalance,
+        available: user.learningDollarsEarned
+      });
+    }
+
     // Check if user is already a member
     const existingMembership = await prisma.leagueMembership.findUnique({
       where: {
@@ -387,10 +431,6 @@ router.post('/join-by-code', async (req, res) => {
         userId,
       },
     });
-
-    // Get league settings to determine starting balance
-    const settings = league.settings ? JSON.parse(league.settings) : {};
-    const startingBalance = settings.startingBalance || 10000;
 
     // Create portfolio with starting balance
     await prisma.fantasyPortfolio.create({

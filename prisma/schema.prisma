@@ -31,6 +31,11 @@ model User {
   learningStreak       Int     @default(0)
   totalLearningDollars Decimal @default(0.0)
 
+  // Lesson Progress Tracking
+  currentUnit          Int     @default(1) // Current unit the user is on
+  currentLesson        Int     @default(1) // Current lesson within the unit
+  learningDollarsEarned Decimal @default(500.0) // Total learning dollars earned (starts at 500)
+
   // Fantasy Finance - Completed lessons for asset gating
   completedLessons String[] @default([])
 
@@ -62,6 +67,8 @@ model Lesson {
   title         String
   description   String?
   content       String // JSON or markdown content
+  unit          Int     @default(1) // Unit number (e.g., 1, 2, 3)
+  lessonNumber  Int     @default(1) // Lesson number within the unit
   category      String // e.g., "investing", "saving", "budgeting"
   difficulty    String // "beginner", "intermediate", "advanced"
   estimatedTime Int // minutes
@@ -76,6 +83,7 @@ model Lesson {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([unit, lessonNumber])
   @@map("lessons")
 }
 

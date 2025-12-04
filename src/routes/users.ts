@@ -316,4 +316,162 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// GET /users/:id/lesson-progress - Get user's lesson progress
+router.get('/:id/lesson-progress', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        currentUnit: true,
+        currentLesson: true,
+        learningDollarsEarned: true,
+        completedLessons: true,
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found',
+        message: `User with id ${id} does not exist`
+      });
+    }
+
+    res.json(user);
+
+  } catch (error) {
+    console.error('Get lesson progress error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to fetch lesson progress'
+    });
+  }
+});
+
+// PUT /users/:id/lesson-progress - Update user's lesson progress
+router.put('/:id/lesson-progress', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { currentUnit, currentLesson, learningDollarsEarned, completedLessonId } = req.body;
+
+    const user = await prisma.user.findUnique({
+      where: { id }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found',
+        message: `User with id ${id} does not exist`
+      });
+    }
+
+    // Build update data
+    const updateData: any = {};
+    
+    if (currentUnit !== undefined) updateData.currentUnit = currentUnit;
+    if (currentLesson !== undefined) updateData.currentLesson = currentLesson;
+    if (learningDollarsEarned !== undefined) updateData.learningDollarsEarned = learningDollarsEarned;
+    
+    // Add completed lesson to the array if provided
+    if (completedLessonId && !user.completedLessons.includes(completedLessonId)) {
+      updateData.completedLessons = {
+        push: completedLessonId
+      };
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: updateData,
+      select: {
+        id: true,
+        currentUnit: true,
+        currentLesson: true,
+        learningDollarsEarned: true,
+        completedLessons: true,
+      }
+    });
+
+    res.json({
+      message: 'Lesson progress updated successfully',
+      user: updatedUser
+    });
+
+  } catch (error) {
+    console.error('Update lesson progress error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to update lesson progress'
+    });
+  }
+});
+
+// POST /users/:id/complete-lesson - Mark a lesson as complete and award learning dollars
+router.post('/:id/complete-lesson', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { lessonId, rewardDollars } = req.body;
+
+    if (!lessonId || rewardDollars === undefined) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: 'lessonId and rewardDollars are required'
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found',
+        message: `User with id ${id} does not exist`
+      });
+    }
+
+    // Check if lesson already completed
+    if (user.completedLessons.includes(lessonId)) {
+      return res.status(400).json({
+        error: 'Lesson already completed',
+        message: 'This lesson has already been completed'
+      });
+    }
+
+    // Update user with completed lesson and award dollars
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: {
+        completedLessons: {
+          push: lessonId
+        },
+        learningDollarsEarned: {
+          increment: rewardDollars
+        }
+      },
+      select: {
+        id: true,
+        currentUnit: true,
+        currentLesson: true,
+        learningDollarsEarned: true,
+        completedLessons: true,
+      }
+    });
+
+    res.json({
+      message: 'Lesson completed successfully',
+      user: updatedUser,
+      dollarsEarned: rewardDollars
+    });
+
+  } catch (error) {
+    console.error('Complete lesson error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to complete lesson'
+    });
+  }
+});
+
 export default router;
