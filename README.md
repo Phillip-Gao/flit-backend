@@ -29,28 +29,33 @@ This is the backend API for the Flit financial literacy app. It provides user ma
    ```
 
 2. **Start Docker services**
+   Older version
    ```bash
    docker-compose up -d
+   ```
+   Newer version
+   ```bash
+   docker compose up -d
    ```
    This starts:
    - PostgreSQL database on port 5433
    - Redis cache on port 6379
    - pgAdmin on port 8080
 
-3. **Configure environment**
+4. **Configure environment**
    ```bash
    cp .env.example .env
    # Edit DATABASE_URL to use Docker: 
    # DATABASE_URL="postgresql://postgres:flit1234567@localhost:5433/flit_dev?schema=public"
    ```
 
-4. **Initialize database**
+5. **Initialize database**
    ```bash
    npm run db:push
    npm run db:seed  # Optional: add sample data
    ```
 
-5. **Start development server**
+6. **Start development server**
    ```bash
    npm run dev
    ```
