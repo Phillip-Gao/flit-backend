@@ -12,8 +12,8 @@ const generateJoinCode = (): string => {
   return code;
 };
 
-// Helper function to calculate league status based on start date and competition period
-const calculateLeagueStatus = (settings: any): 'pending' | 'active' | 'completed' => {
+// Helper function to calculate group status based on start date and competition period
+const calculateGroupStatus = (settings: any): 'pending' | 'active' | 'completed' => {
   if (!settings || !settings.startDate || !settings.competitionPeriod) {
     return 'pending';
   }
@@ -46,12 +46,12 @@ import fantasyDraftRoutes from './fantasyDraft';
 const router = Router();
 
 // Validation schemas
-const createLeagueSchema = z.object({
+const createGroupSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().optional(),
   adminUserId: z.string(),
   settings: z.object({
-    leagueSize: z.number().int().min(2).max(20),
+    groupSize: z.number().int().min(2).max(20),
     startingBalance: z.number().min(1000).max(1000000).default(10000),
     competitionPeriod: z.enum(['1_week', '2_weeks', '1_month', '3_months', '6_months', '1_year']),
     startDate: z.string().datetime(),
@@ -63,7 +63,7 @@ const createLeagueSchema = z.object({
   }),
 });
 
-// GET /api/fantasy-leagues - List leagues for current user
+// GET /api/fantasy-leagues - List groups for current user
 router.get('/', async (req, res) => {
   try {
     const { userId } = req.query;
@@ -72,7 +72,7 @@ router.get('/', async (req, res) => {
       return res.status(400).json({ error: 'userId is required' });
     }
 
-    const leagues = await prisma.league.findMany({
+    const groups = await prisma.group.findMany({
       where: {
         OR: [
           { adminUserId: userId as string },
@@ -110,32 +110,32 @@ router.get('/', async (req, res) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    const formatted = leagues.map((league: any) => {
-      const settings = league.settings ? JSON.parse(league.settings) : null;
+    const formatted = groups.map((g: any) => {
+      const settings = g.settings ? JSON.parse(g.settings) : null;
       return {
-        ...league,
+        ...g,
         settings,
-        criteria: league.criteria ? JSON.parse(league.criteria) : null,
-        memberCount: league._count.memberships,
-        members: league.memberships.map((m: any) => m.user),
-        status: calculateLeagueStatus(settings),
-        currentWeek: 0, // TODO: Calculate based on league start date and current date
+        criteria: g.criteria ? JSON.parse(g.criteria) : null,
+        memberCount: g._count.memberships,
+        members: g.memberships.map((m: any) => m.user),
+        status: calculateGroupStatus(settings),
+        currentWeek: 0, // TODO: Calculate based on group start date and current date
       };
     });
 
-    res.json({ leagues: formatted });
+    res.json({ groups: formatted });
   } catch (error) {
-    console.error('Error fetching leagues:', error);
+    console.error('Error fetching groups:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET /api/fantasy-leagues/:id - Get detailed league info
+// GET /api/fantasy-leagues/:id - Get detailed group info
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const league = await prisma.league.findUnique({
+    const group = await prisma.group.findUnique({
       where: { id },
       include: {
         admin: {
@@ -182,47 +182,47 @@ router.get('/:id', async (req, res) => {
       },
     });
 
-    if (!league) {
-      return res.status(404).json({ error: 'League not found' });
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
     }
 
-    const settings = league.settings ? JSON.parse(league.settings) : null;
+    const settings = group.settings ? JSON.parse(group.settings) : null;
     const formatted = {
-      ...league,
+      ...group,
       settings,
-      criteria: league.criteria ? JSON.parse(league.criteria) : null,
-      members: league.memberships.map((m: any) => m.user),
-      status: calculateLeagueStatus(settings),
-      currentWeek: 0, // TODO: Calculate based on league start date and current date
+      criteria: group.criteria ? JSON.parse(group.criteria) : null,
+      members: group.memberships.map((m: any) => m.user),
+      status: calculateGroupStatus(settings),
+      currentWeek: 0, // TODO: Calculate based on group start date and current date
     };
 
     res.json(formatted);
   } catch (error) {
-    console.error('Error fetching league:', error);
+    console.error('Error fetching group:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// POST /api/fantasy-leagues - Create a new league
+// POST /api/fantasy-leagues - Create a new group
 router.post('/', async (req, res) => {
   try {
-    const validated = createLeagueSchema.parse(req.body);
+    const validated = createGroupSchema.parse(req.body);
 
     // Generate a unique join code
     let joinCode = generateJoinCode();
-    let codeExists = await prisma.league.findUnique({ where: { joinCode } });
+    let codeExists = await prisma.group.findUnique({ where: { joinCode } });
     while (codeExists) {
       joinCode = generateJoinCode();
-      codeExists = await prisma.league.findUnique({ where: { joinCode } });
+      codeExists = await prisma.group.findUnique({ where: { joinCode } });
     }
 
-    const league = await prisma.league.create({
+    const group = await prisma.group.create({
       data: {
         name: validated.name,
         description: validated.description,
         adminUserId: validated.adminUserId,
         type: 'custom',
-        maxMembers: validated.settings.leagueSize,
+        maxMembers: validated.settings.groupSize,
         settings: JSON.stringify(validated.settings),
         joinCode,
       },
@@ -239,9 +239,9 @@ router.post('/', async (req, res) => {
     });
 
     // Auto-add admin as first member
-    await prisma.leagueMembership.create({
+    await prisma.groupMembership.create({
       data: {
-        leagueId: league.id,
+        groupId: group.id,
         userId: validated.adminUserId,
       },
     });
@@ -249,15 +249,15 @@ router.post('/', async (req, res) => {
     // Create portfolio for admin with starting balance
     await prisma.fantasyPortfolio.create({
       data: {
-        leagueId: league.id,
+        groupId: group.id,
         userId: validated.adminUserId,
         cashBalance: validated.settings.startingBalance,
       },
     });
 
     const formatted = {
-      ...league,
-      settings: JSON.parse(league.settings || '{}'),
+      ...group,
+      settings: JSON.parse(group.settings || '{}'),
     };
 
     res.status(201).json(formatted);
@@ -265,12 +265,12 @@ router.post('/', async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.issues });
     }
-    console.error('Error creating league:', error);
+    console.error('Error creating group:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// POST /api/fantasy-leagues/:id/join - Join a league
+// POST /api/fantasy-leagues/:id/join - Join a group
 router.post('/:id/join', async (req, res) => {
   try {
     const { id } = req.params;
@@ -280,7 +280,7 @@ router.post('/:id/join', async (req, res) => {
       return res.status(400).json({ error: 'userId is required' });
     }
 
-    const league = await prisma.league.findUnique({
+    const group = await prisma.group.findUnique({
       where: { id },
       include: {
         _count: {
@@ -289,12 +289,12 @@ router.post('/:id/join', async (req, res) => {
       },
     });
 
-    if (!league) {
-      return res.status(404).json({ error: 'League not found' });
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
     }
 
-    if (league._count.memberships >= league.maxMembers) {
-      return res.status(400).json({ error: 'League is full' });
+    if (group._count.memberships >= group.maxMembers) {
+      return res.status(400).json({ error: 'Group is full' });
     }
 
     // Get user to check learning dollars
@@ -307,38 +307,38 @@ router.post('/:id/join', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Get league settings to check starting balance
-    const settings = league.settings ? JSON.parse(league.settings) : {};
+    // Get group settings to check starting balance
+    const settings = group.settings ? JSON.parse(group.settings) : {};
     const startingBalance = settings.startingBalance || 10000;
 
     // Validate user has enough learning dollars
     if (user.learningDollarsEarned < startingBalance) {
       return res.status(403).json({ 
         error: 'Insufficient learning dollars',
-        message: `You need at least $${startingBalance} in learning dollars to join this league. You currently have $${user.learningDollarsEarned}.`,
+        message: `You need at least $${startingBalance} in learning dollars to join this group. You currently have $${user.learningDollarsEarned}.`,
         required: startingBalance,
         available: user.learningDollarsEarned
       });
     }
 
     // Check if user is already a member
-    const existingMembership = await prisma.leagueMembership.findUnique({
+    const existingMembership = await prisma.groupMembership.findUnique({
       where: {
-        userId_leagueId: {
+        userId_groupId: {
           userId,
-          leagueId: id,
+          groupId: id,
         },
       },
     });
 
     if (existingMembership) {
-      return res.status(400).json({ error: 'Already a member of this league' });
+      return res.status(400).json({ error: 'Already a member of this group' });
     }
 
     // Create membership
-    const membership = await prisma.leagueMembership.create({
+    const membership = await prisma.groupMembership.create({
       data: {
-        leagueId: id,
+        groupId: id,
         userId,
       },
     });
@@ -346,7 +346,7 @@ router.post('/:id/join', async (req, res) => {
     // Create portfolio with starting balance
     await prisma.fantasyPortfolio.create({
       data: {
-        leagueId: id,
+        groupId: id,
         userId,
         cashBalance: startingBalance,
       },
@@ -354,12 +354,12 @@ router.post('/:id/join', async (req, res) => {
 
     res.status(201).json(membership);
   } catch (error) {
-    console.error('Error joining league:', error);
+    console.error('Error joining group:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// POST /api/fantasy-leagues/join-by-code - Join a league by join code
+// POST /api/fantasy-leagues/join-by-code - Join a group by join code
 router.post('/join-by-code', async (req, res) => {
   try {
     const { joinCode, userId } = req.body;
@@ -368,8 +368,8 @@ router.post('/join-by-code', async (req, res) => {
       return res.status(400).json({ error: 'joinCode and userId are required' });
     }
 
-    // Find league by join code
-    const league = await prisma.league.findUnique({
+    // Find group by join code
+    const group = await prisma.group.findUnique({
       where: { joinCode: joinCode.toUpperCase() },
       include: {
         _count: {
@@ -378,12 +378,12 @@ router.post('/join-by-code', async (req, res) => {
       },
     });
 
-    if (!league) {
+    if (!group) {
       return res.status(404).json({ error: 'Invalid join code' });
     }
 
-    if (league._count.memberships >= league.maxMembers) {
-      return res.status(400).json({ error: 'League is full' });
+    if (group._count.memberships >= group.maxMembers) {
+      return res.status(400).json({ error: 'Group is full' });
     }
 
     // Get user to check learning dollars
@@ -396,38 +396,38 @@ router.post('/join-by-code', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Get league settings to check starting balance
-    const settings = league.settings ? JSON.parse(league.settings) : {};
+    // Get group settings to check starting balance
+    const settings = group.settings ? JSON.parse(group.settings) : {};
     const startingBalance = settings.startingBalance || 10000;
 
     // Validate user has enough learning dollars
     if (user.learningDollarsEarned < startingBalance) {
       return res.status(403).json({ 
         error: 'Insufficient learning dollars',
-        message: `You need at least $${startingBalance} in learning dollars to join this league. You currently have $${user.learningDollarsEarned}. Complete more lessons to earn learning dollars!`,
+        message: `You need at least $${startingBalance} in learning dollars to join this group. You currently have $${user.learningDollarsEarned}. Complete more lessons to earn learning dollars!`,
         required: startingBalance,
         available: user.learningDollarsEarned
       });
     }
 
     // Check if user is already a member
-    const existingMembership = await prisma.leagueMembership.findUnique({
+    const existingMembership = await prisma.groupMembership.findUnique({
       where: {
-        userId_leagueId: {
+        userId_groupId: {
           userId,
-          leagueId: league.id,
+          groupId: group.id,
         },
       },
     });
 
     if (existingMembership) {
-      return res.status(400).json({ error: 'Already a member of this league' });
+      return res.status(400).json({ error: 'Already a member of this group' });
     }
 
     // Create membership
-    const membership = await prisma.leagueMembership.create({
+    const membership = await prisma.groupMembership.create({
       data: {
-        leagueId: league.id,
+        groupId: group.id,
         userId,
       },
     });
@@ -435,7 +435,7 @@ router.post('/join-by-code', async (req, res) => {
     // Create portfolio with starting balance
     await prisma.fantasyPortfolio.create({
       data: {
-        leagueId: league.id,
+        groupId: group.id,
         userId,
         cashBalance: startingBalance,
       },
@@ -443,14 +443,14 @@ router.post('/join-by-code', async (req, res) => {
 
     res.status(201).json({
       membership,
-      league: {
-        id: league.id,
-        name: league.name,
-        description: league.description,
+      group: {
+        id: group.id,
+        name: group.name,
+        description: group.description,
       },
     });
   } catch (error) {
-    console.error('Error joining league by code:', error);
+    console.error('Error joining group by code:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -465,24 +465,24 @@ router.post('/:id/start', async (req, res) => {
       return res.status(400).json({ error: 'userId is required' });
     }
 
-    const league = await prisma.league.findUnique({
+    const group = await prisma.group.findUnique({
       where: { id },
     });
 
-    if (!league) {
-      return res.status(404).json({ error: 'League not found' });
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
     }
 
     // Check if user is the admin
-    if (league.adminUserId !== userId) {
-      return res.status(403).json({ error: 'Only the league admin can start the competition' });
+    if (group.adminUserId !== userId) {
+      return res.status(403).json({ error: 'Only the group admin can start the competition' });
     }
 
-    // Update the league settings to set the start date to now
-    const settings = league.settings ? JSON.parse(league.settings) : {};
+    // Update the group settings to set the start date to now
+    const settings = group.settings ? JSON.parse(group.settings) : {};
     settings.startDate = new Date().toISOString();
 
-    await prisma.league.update({
+    await prisma.group.update({
       where: { id },
       data: {
         settings: JSON.stringify(settings),
@@ -499,7 +499,7 @@ router.post('/:id/start', async (req, res) => {
   }
 });
 
-// DELETE /api/fantasy-leagues/:id/leave - Leave a league
+// DELETE /api/fantasy-leagues/:id/leave - Leave a group
 router.delete('/:id/leave', async (req, res) => {
   try {
     const { id } = req.params;
@@ -509,7 +509,7 @@ router.delete('/:id/leave', async (req, res) => {
       return res.status(400).json({ error: 'userId is required' });
     }
 
-    const league = await prisma.league.findUnique({
+    const group = await prisma.group.findUnique({
       where: { id },
       include: {
         _count: {
@@ -529,79 +529,79 @@ router.delete('/:id/leave', async (req, res) => {
       },
     });
 
-    if (!league) {
-      return res.status(404).json({ error: 'League not found' });
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
     }
 
     // Check if user is the admin
-    const isAdmin = league.adminUserId === userId;
+    const isAdmin = group.adminUserId === userId;
 
     // Check if user is a member (admin might not have a membership if they haven't joined)
-    const membership = await prisma.leagueMembership.findUnique({
+    const membership = await prisma.groupMembership.findUnique({
       where: {
-        userId_leagueId: {
+        userId_groupId: {
           userId,
-          leagueId: id,
+          groupId: id,
         },
       },
     });
 
-    // If user is admin, delete the entire league
+    // If user is admin, delete the entire group
     if (isAdmin) {
       // Delete all member portfolios
       await prisma.portfolioSlot.deleteMany({
         where: {
           portfolio: {
-            leagueId: id,
+            groupId: id,
           },
         },
       });
 
       await prisma.fantasyPortfolio.deleteMany({
-        where: { leagueId: id },
+        where: { groupId: id },
       });
 
       // Delete all memberships
-      await prisma.leagueMembership.deleteMany({
-        where: { leagueId: id },
+      await prisma.groupMembership.deleteMany({
+        where: { groupId: id },
       });
 
       // Delete all related data
       await prisma.draftPick.deleteMany({
         where: {
           draftState: {
-            leagueId: id,
+            groupId: id,
           },
         },
       });
 
       await prisma.draftState.deleteMany({
-        where: { leagueId: id },
+        where: { groupId: id },
       });
 
       await prisma.matchup.deleteMany({
-        where: { leagueId: id },
+        where: { groupId: id },
       });
 
-      await prisma.league.delete({
+      await prisma.group.delete({
         where: { id },
       });
 
       return res.json({
-        message: 'League deleted successfully (admin left).',
-        leagueDeleted: true,
+        message: 'Group deleted successfully (admin left).',
+        groupDeleted: true,
       });
     }
 
     // User is not admin, just a regular member
     if (!membership) {
-      return res.status(404).json({ error: 'Not a member of this league' });
+      return res.status(404).json({ error: 'Not a member of this group' });
     }
 
-    // Delete user's portfolio for this league
+    // Delete user's portfolio for this group
     await prisma.fantasyPortfolio.deleteMany({
       where: {
-        leagueId: id,
+        groupId: id,
         userId,
       },
     });
@@ -610,62 +610,62 @@ router.delete('/:id/leave', async (req, res) => {
     await prisma.portfolioSlot.deleteMany({
       where: {
         portfolio: {
-          leagueId: id,
+          groupId: id,
           userId,
         },
       },
     });
 
     // Delete the membership
-    await prisma.leagueMembership.delete({
+    await prisma.groupMembership.delete({
       where: {
-        userId_leagueId: {
+        userId_groupId: {
           userId,
-          leagueId: id,
+          groupId: id,
         },
       },
     });
 
     // Check if there are any remaining members
-    const remainingMembers = await prisma.leagueMembership.count({
-      where: { leagueId: id },
+    const remainingMembers = await prisma.groupMembership.count({
+      where: { groupId: id },
     });
 
-    // If no members remain, delete the league
+    // If no members remain, delete the group
     if (remainingMembers === 0) {
       // Delete all related data
       await prisma.draftPick.deleteMany({
         where: {
           draftState: {
-            leagueId: id,
+            groupId: id,
           },
         },
       });
 
       await prisma.draftState.deleteMany({
-        where: { leagueId: id },
+        where: { groupId: id },
       });
 
       await prisma.matchup.deleteMany({
-        where: { leagueId: id },
+        where: { groupId: id },
       });
 
-      await prisma.league.delete({
+      await prisma.group.delete({
         where: { id },
       });
 
       return res.json({
-        message: 'Left league successfully. League deleted as no members remain.',
-        leagueDeleted: true,
+        message: 'Left group successfully. Group deleted as no members remain.',
+        groupDeleted: true,
       });
     }
 
     res.json({
-      message: 'Left league successfully',
-      leagueDeleted: false,
+      message: 'Left group successfully',
+      groupDeleted: false,
     });
   } catch (error) {
-    console.error('Error leaving league:', error);
+    console.error('Error leaving group:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

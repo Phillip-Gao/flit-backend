@@ -258,8 +258,8 @@ router.put('/friend-request', async (req, res) => {
   }
 });
 
-// GET /api/social/leagues - Get all leagues
-router.get('/leagues', async (req, res) => {
+// GET /api/social/groups - Get all groups
+router.get('/groups', async (req, res) => {
   try {
     const { page = 1, limit = 10, type } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
@@ -268,7 +268,7 @@ router.get('/leagues', async (req, res) => {
     if (type) where.type = type;
 
     const [leagues, total] = await Promise.all([
-      prisma.league.findMany({
+      prisma.group.findMany({
         where,
         include: {
           _count: {
@@ -283,17 +283,17 @@ router.get('/leagues', async (req, res) => {
         take: Number(limit),
         skip: offset,
       }),
-      prisma.league.count({ where })
+      prisma.group.count({ where })
     ]);
 
-    const leaguesWithStats = leagues.map((league: any) => ({
-      ...league,
-      memberCount: league._count.memberships,
+    const groupsWithStats = leagues.map((group: any) => ({
+      ...group,
+      memberCount: group._count.memberships,
       _count: undefined, // Remove the count object
     }));
 
     res.json({
-      leagues: leaguesWithStats,
+      groups: groupsWithStats,
       pagination: {
         page: Number(page),
         limit: Number(limit),
@@ -302,17 +302,17 @@ router.get('/leagues', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching leagues:', error);
+    console.error('Error fetching groups:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET /api/social/leagues/:id - Get league details with members
-router.get('/leagues/:id', async (req, res) => {
+// GET /api/social/groups/:id - Get group details with members
+router.get('/groups/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const league = await prisma.league.findUnique({
+    const group = await prisma.group.findUnique({
       where: { id },
       include: {
         memberships: {
@@ -337,29 +337,29 @@ router.get('/leagues/:id', async (req, res) => {
       }
     });
 
-    if (!league) {
-      return res.status(404).json({ error: 'League not found' });
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
     }
 
-    res.json(league);
+    res.json(group);
   } catch (error) {
-    console.error('Error fetching league:', error);
+    console.error('Error fetching group:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET /api/social/users/:userId/leagues - Get user's leagues
-router.get('/users/:userId/leagues', async (req, res) => {
+// GET /api/social/users/:userId/groups - Get user's groups
+router.get('/users/:userId/groups', async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const memberships = await prisma.leagueMembership.findMany({
+    const memberships = await prisma.groupMembership.findMany({
       where: {
         userId,
         isActive: true,
       },
       include: {
-        league: {
+        group: {
           include: {
             _count: {
               select: {
@@ -374,9 +374,9 @@ router.get('/users/:userId/leagues', async (req, res) => {
       orderBy: { joinedAt: 'desc' }
     });
 
-    const userLeagues = memberships.map((membership: any) => ({
-      ...membership.league,
-      memberCount: membership.league._count.memberships,
+    const userGroups = memberships.map((membership: any) => ({
+      ...membership.group,
+      memberCount: membership.group._count.memberships,
       userRank: membership.rank,
       userScore: membership.score,
       joinedAt: membership.joinedAt,
@@ -384,24 +384,24 @@ router.get('/users/:userId/leagues', async (req, res) => {
     }));
 
     res.json({
-      leagues: userLeagues,
-      total: userLeagues.length
+      groups: userGroups,
+      total: userGroups.length
     });
   } catch (error) {
-    console.error('Error fetching user leagues:', error);
+    console.error('Error fetching user groups:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// POST /api/social/leagues/:id/join - Join a league
-router.post('/leagues/:id/join', async (req, res) => {
+// POST /api/social/groups/:id/join - Join a group
+router.post('/groups/:id/join', async (req, res) => {
   try {
-    const { id: leagueId } = req.params;
+    const { id: groupId } = req.params;
     const { userId } = req.body;
 
-    // Check if league exists and has space
-    const league = await prisma.league.findUnique({
-      where: { id: leagueId },
+    // Check if group exists and has space
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
       include: {
         _count: {
           select: {
@@ -413,38 +413,38 @@ router.post('/leagues/:id/join', async (req, res) => {
       }
     });
 
-    if (!league) {
-      return res.status(404).json({ error: 'League not found' });
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
     }
 
-    if (!league.isActive) {
-      return res.status(400).json({ error: 'League is not active' });
+    if (!group.isActive) {
+      return res.status(400).json({ error: 'Group is not active' });
     }
 
-    if (league._count.memberships >= league.maxMembers) {
-      return res.status(400).json({ error: 'League is full' });
+    if (group._count.memberships >= group.maxMembers) {
+      return res.status(400).json({ error: 'Group is full' });
     }
 
     // Check if user is already a member
-    const existingMembership = await prisma.leagueMembership.findUnique({
+    const existingMembership = await prisma.groupMembership.findUnique({
       where: {
-        userId_leagueId: {
+        userId_groupId: {
           userId,
-          leagueId,
+          groupId,
         }
       }
     });
 
     if (existingMembership && existingMembership.isActive) {
-      return res.status(400).json({ error: 'Already a member of this league' });
+      return res.status(400).json({ error: 'Already a member of this group' });
     }
 
-    // Join league
-    const membership = await prisma.leagueMembership.upsert({
+    // Join group
+    const membership = await prisma.groupMembership.upsert({
       where: {
-        userId_leagueId: {
+        userId_groupId: {
           userId,
-          leagueId,
+          groupId,
         }
       },
       update: {
@@ -453,10 +453,10 @@ router.post('/leagues/:id/join', async (req, res) => {
       },
       create: {
         userId,
-        leagueId,
+        groupId,
       },
       include: {
-        league: true,
+        group: true,
         user: {
           select: {
             id: true,
@@ -470,35 +470,35 @@ router.post('/leagues/:id/join', async (req, res) => {
 
     res.status(201).json(membership);
   } catch (error) {
-    console.error('Error joining league:', error);
+    console.error('Error joining group:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// DELETE /api/social/leagues/:id/leave - Leave a league
-router.delete('/leagues/:id/leave', async (req, res) => {
+// DELETE /api/social/groups/:id/leave - Leave a group
+router.delete('/groups/:id/leave', async (req, res) => {
   try {
-    const { id: leagueId } = req.params;
+    const { id: groupId } = req.params;
     const { userId } = req.body;
 
-    const membership = await prisma.leagueMembership.findUnique({
+    const membership = await prisma.groupMembership.findUnique({
       where: {
-        userId_leagueId: {
+        userId_groupId: {
           userId,
-          leagueId,
+          groupId,
         }
       }
     });
 
     if (!membership || !membership.isActive) {
-      return res.status(404).json({ error: 'Not a member of this league' });
+      return res.status(404).json({ error: 'Not a member of this group' });
     }
 
-    await prisma.leagueMembership.update({
+    await prisma.groupMembership.update({
       where: {
-        userId_leagueId: {
+        userId_groupId: {
           userId,
-          leagueId,
+          groupId,
         }
       },
       data: {
@@ -508,7 +508,7 @@ router.delete('/leagues/:id/leave', async (req, res) => {
 
     res.status(204).send();
   } catch (error) {
-    console.error('Error leaving league:', error);
+    console.error('Error leaving group:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

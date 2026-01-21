@@ -210,76 +210,228 @@ async function seed() {
 
   console.log('✅ Created portfolio holdings');
 
-  // Create sample leagues
-  const leagues = await Promise.all([
-    prisma.league.create({
+  // Create sample groups with fantasy finance settings
+  const groups = await Promise.all([
+    prisma.group.create({
       data: {
-        name: 'Beginner Investors',
-        description: 'A league for those just starting their investment journey',
-        type: 'beginner',
-        maxMembers: 30,
-        criteria: JSON.stringify({ minScore: 0, maxScore: 500 }),
-      },
-    }),
-    prisma.league.create({
-      data: {
-        name: 'Budgeting Masters',
-        description: 'For users who excel at budgeting and saving',
+        name: 'Tech Investors',
+        description: 'Group focused on technology stocks and growth investing',
+        adminUserId: users[0].id,
         type: 'intermediate',
-        maxMembers: 25,
-        criteria: JSON.stringify({ categories: ['budgeting', 'saving'] }),
+        maxMembers: 8,
+        joinCode: 'TECH123',
+        settings: JSON.stringify({
+          groupSize: 8,
+          startingBalance: 10000,
+          competitionPeriod: '3_months',
+          startDate: new Date('2024-01-01').toISOString(),
+          scoringMethod: 'Total Return %',
+          enabledAssetClasses: ['Stock', 'ETF'],
+          minAssetPrice: 1,
+          allowShortSelling: false,
+          tradingEnabled: true,
+        }),
+        criteria: JSON.stringify({ minScore: 500, category: 'investing' }),
       },
     }),
-    prisma.league.create({
+    prisma.group.create({
       data: {
-        name: 'High Achievers',
-        description: 'Elite league for top financial literacy champions',
+        name: 'Value Hunters',
+        description: 'Long-term value investing group for patient investors',
+        adminUserId: users[1].id,
         type: 'advanced',
-        maxMembers: 15,
-        criteria: JSON.stringify({ minScore: 800, minStreak: 30 }),
+        maxMembers: 6,
+        joinCode: 'VALUE456',
+        settings: JSON.stringify({
+          groupSize: 6,
+          startingBalance: 25000,
+          competitionPeriod: '6_months',
+          startDate: new Date('2024-01-15').toISOString(),
+          scoringMethod: 'Absolute Gain $',
+          enabledAssetClasses: ['Stock', 'ETF', 'REIT'],
+          minAssetPrice: 5,
+          allowShortSelling: false,
+          tradingEnabled: true,
+        }),
+        criteria: JSON.stringify({ minScore: 700, minStreak: 20 }),
+      },
+    }),
+    prisma.group.create({
+      data: {
+        name: 'Beginner Traders',
+        description: 'Learn the basics of stock trading in a friendly environment',
+        adminUserId: users[0].id,
+        type: 'beginner',
+        maxMembers: 10,
+        joinCode: 'BEGIN789',
+        settings: JSON.stringify({
+          groupSize: 10,
+          startingBalance: 5000,
+          competitionPeriod: '1_month',
+          startDate: new Date('2024-02-01').toISOString(),
+          scoringMethod: 'Total Return %',
+          enabledAssetClasses: ['Stock'],
+          minAssetPrice: 1,
+          allowShortSelling: false,
+          tradingEnabled: true,
+        }),
+        criteria: JSON.stringify({ minScore: 0, maxScore: 600 }),
       },
     }),
   ]);
 
-  console.log(`✅ Created ${leagues.length} leagues`);
+  console.log(`✅ Created ${groups.length} groups`);
 
-  // Create league memberships
+  // Create group memberships
   await Promise.all([
-    prisma.leagueMembership.create({
+    prisma.groupMembership.create({
       data: {
-        userId: users[0].id, // John
-        leagueId: leagues[0].id, // Beginner Investors
+        userId: users[0].id, // John - Admin of Tech Investors
+        groupId: groups[0].id,
         rank: 2,
         score: 750,
       },
     }),
-    prisma.leagueMembership.create({
+    prisma.groupMembership.create({
       data: {
         userId: users[1].id, // Jane
-        leagueId: leagues[1].id, // Budgeting Masters
+        groupId: groups[0].id, // Tech Investors
         rank: 1,
         score: 820,
       },
     }),
-    prisma.leagueMembership.create({
-      data: {
-        userId: users[1].id, // Jane
-        leagueId: leagues[2].id, // High Achievers
-        rank: 3,
-        score: 820,
-      },
-    }),
-    prisma.leagueMembership.create({
+    prisma.groupMembership.create({
       data: {
         userId: users[3].id, // Sarah
-        leagueId: leagues[2].id, // High Achievers
+        groupId: groups[0].id, // Tech Investors
+        rank: 3,
+        score: 650,
+      },
+    }),
+    prisma.groupMembership.create({
+      data: {
+        userId: users[1].id, // Jane - Admin of Value Hunters
+        groupId: groups[1].id,
         rank: 1,
+        score: 820,
+      },
+    }),
+    prisma.groupMembership.create({
+      data: {
+        userId: users[3].id, // Sarah
+        groupId: groups[1].id, // Value Hunters
+        rank: 2,
         score: 920,
+      },
+    }),
+    prisma.groupMembership.create({
+      data: {
+        userId: users[2].id, // Mike
+        groupId: groups[1].id, // Value Hunters
+        rank: 3,
+        score: 680,
+      },
+    }),
+    prisma.groupMembership.create({
+      data: {
+        userId: users[0].id, // John - Admin of Beginner Traders
+        groupId: groups[2].id,
+        rank: 1,
+        score: 750,
+      },
+    }),
+    prisma.groupMembership.create({
+      data: {
+        userId: users[2].id, // Mike
+        groupId: groups[2].id, // Beginner Traders
+        rank: 2,
+        score: 680,
       },
     }),
   ]);
 
-  console.log('✅ Created league memberships');
+  console.log('✅ Created group memberships');
+
+  // Create fantasy portfolios for group members with varied values
+  const fantasyPortfolios = await Promise.all([
+    // Tech Investors Group Portfolios
+    prisma.fantasyPortfolio.create({
+      data: {
+        userId: users[0].id, // John
+        groupId: groups[0].id,
+        cashBalance: 2500.00,
+        totalValue: 11500.00, // $1,500 gain (15% return)
+        
+      },
+    }),
+    prisma.fantasyPortfolio.create({
+      data: {
+        userId: users[1].id, // Jane
+        groupId: groups[0].id,
+        cashBalance: 1000.00,
+        totalValue: 12800.00, // $2,800 gain (28% return) - Best performer
+        
+      },
+    }),
+    prisma.fantasyPortfolio.create({
+      data: {
+        userId: users[3].id, // Sarah
+        groupId: groups[0].id,
+        cashBalance: 3200.00,
+        totalValue: 10500.00, // $500 gain (5% return)
+        
+      },
+    }),
+    // Value Hunters Group Portfolios
+    prisma.fantasyPortfolio.create({
+      data: {
+        userId: users[1].id, // Jane
+        groupId: groups[1].id,
+        cashBalance: 5000.00,
+        totalValue: 28500.00, // $3,500 gain (14% return)
+        
+      },
+    }),
+    prisma.fantasyPortfolio.create({
+      data: {
+        userId: users[3].id, // Sarah
+        groupId: groups[1].id,
+        cashBalance: 2500.00,
+        totalValue: 31200.00, // $6,200 gain (24.8% return) - Best performer
+        
+      },
+    }),
+    prisma.fantasyPortfolio.create({
+      data: {
+        userId: users[2].id, // Mike
+        groupId: groups[1].id,
+        cashBalance: 8000.00,
+        totalValue: 26800.00, // $1,800 gain (7.2% return)
+        
+      },
+    }),
+    // Beginner Traders Group Portfolios
+    prisma.fantasyPortfolio.create({
+      data: {
+        userId: users[0].id, // John
+        groupId: groups[2].id,
+        cashBalance: 1500.00,
+        totalValue: 5600.00, // $600 gain (12% return) - Best performer
+        
+      },
+    }),
+    prisma.fantasyPortfolio.create({
+      data: {
+        userId: users[2].id, // Mike
+        groupId: groups[2].id,
+        cashBalance: 2000.00,
+        totalValue: 5200.00, // $200 gain (4% return)
+        
+      },
+    }),
+  ]);
+
+  console.log('✅ Created fantasy portfolios with varied values');
 
   // Create some friendships
   await Promise.all([
