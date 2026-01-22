@@ -3,7 +3,7 @@ import userRoutes from './users';
 import lessonRoutes from './lessons';
 import portfolioRoutes from './portfolio';
 import socialRoutes from './social';
-import fantasyLeaguesRoutes from './fantasyLeagues';
+import fantasyGroupsRoutes from './fantasyGroups';
 import fantasyFeaturesRoutes from './fantasyFeatures';
 import fantasyTradingRoutes from './fantasyTrading';
 
@@ -22,8 +22,8 @@ router.use('/portfolio', portfolioRoutes);
 router.use('/social', socialRoutes);
 
 // Fantasy Finance routes
-router.use('/fantasy-leagues', fantasyTradingRoutes);
-router.use('/fantasy-leagues', fantasyLeaguesRoutes);
+router.use('/fantasy-groups', fantasyTradingRoutes);
+router.use('/fantasy-groups', fantasyGroupsRoutes);
 router.use('/fantasy', fantasyFeaturesRoutes);
 
 export default router;

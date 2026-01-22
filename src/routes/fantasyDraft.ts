@@ -42,12 +42,12 @@ async function checkAssetLessonGating(userId: string, assetId: string): Promise<
 }
 
 // GET /api/fantasy-leagues/:id/draft - Get current draft state
-router.get('/:leagueId/draft', async (req, res) => {
+router.get('/:groupId/draft', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
 
     const draftState = await prisma.draftState.findUnique({
-      where: { leagueId },
+      where: { groupId },
       include: {
         picks: {
           include: {
@@ -61,7 +61,7 @@ router.get('/:leagueId/draft', async (req, res) => {
           },
           orderBy: [{ round: 'asc' }, { pickNumber: 'asc' }],
         },
-        league: {
+        group: {
           include: {
             memberships: {
               include: {
@@ -103,17 +103,17 @@ router.get('/:leagueId/draft', async (req, res) => {
   }
 });
 
-// POST /api/fantasy-leagues/:leagueId/draft/pick - Make a draft pick
-router.post('/:leagueId/draft/pick', async (req, res) => {
+// POST /api/fantasy-leagues/:groupId/draft/pick - Make a draft pick
+router.post('/:groupId/draft/pick', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
     const validated = makeDraftPickSchema.parse(req.body);
 
     const draftState = await prisma.draftState.findUnique({
-      where: { leagueId },
+      where: { groupId },
       include: {
         picks: true,
-        league: {
+        group: {
           include: {
             memberships: {
               orderBy: { joinedAt: 'asc' },
@@ -175,8 +175,8 @@ router.post('/:leagueId/draft/pick', async (req, res) => {
     });
 
     // Calculate next pick using snake draft logic
-    const totalMembers = draftState.league.memberships.length;
-    const settings = JSON.parse(draftState.league.settings || '{}');
+    const totalMembers = draftState.group.memberships.length;
+    const settings = JSON.parse(draftState.group.settings || '{}');
     const totalRounds = Math.ceil(settings.portfolioSize / totalMembers);
 
     let nextRound = draftState.currentRound;
@@ -200,7 +200,7 @@ router.post('/:leagueId/draft/pick', async (req, res) => {
       nextUserIndex = totalMembers - nextPickNumber;
     }
 
-    const nextUserId = draftState.league.memberships[nextUserIndex]?.userId;
+    const nextUserId = draftState.group.memberships[nextUserIndex]?.userId;
     const isDraftComplete = nextRound > totalRounds;
 
     // Update draft state
@@ -233,7 +233,7 @@ router.post('/:leagueId/draft/pick', async (req, res) => {
       for (const [userId, userPicks] of Object.entries(picksByUser)) {
         const portfolio = await prisma.fantasyPortfolio.create({
           data: {
-            leagueId,
+            groupId,
             userId,
           },
         });
@@ -269,17 +269,17 @@ router.post('/:leagueId/draft/pick', async (req, res) => {
   }
 });
 
-// GET /api/fantasy-leagues/:leagueId/draft/assets - Get available assets for draft
-router.get('/:leagueId/draft/assets', async (req, res) => {
+// GET /api/fantasy-leagues/:groupId/draft/assets - Get available assets for draft
+router.get('/:groupId/draft/assets', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
     const { type, minPrice, maxPrice, search } = req.query;
 
     const draftState = await prisma.draftState.findUnique({
-      where: { leagueId },
+      where: { groupId },
       include: {
         picks: true,
-        league: true,
+        group: true,
       },
     });
 
@@ -288,7 +288,7 @@ router.get('/:leagueId/draft/assets', async (req, res) => {
     }
 
     const draftedAssetIds = draftState.picks.map((pick) => pick.assetId);
-    const settings = JSON.parse(draftState.league.settings || '{}');
+    const settings = JSON.parse(draftState.group.settings || '{}');
 
     const where: any = {
       id: { notIn: draftedAssetIds },
@@ -345,15 +345,15 @@ router.get('/:leagueId/draft/assets', async (req, res) => {
   }
 });
 
-// POST /api/fantasy-leagues/:leagueId/draft/start - Start the draft
-router.post('/:leagueId/draft/start', async (req, res) => {
+// POST /api/fantasy-leagues/:groupId/draft/start - Start the draft
+router.post('/:groupId/draft/start', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
 
     const draftState = await prisma.draftState.findUnique({
-      where: { leagueId },
+      where: { groupId },
       include: {
-        league: {
+        group: {
           include: {
             memberships: {
               orderBy: { joinedAt: 'asc' },
@@ -371,8 +371,8 @@ router.post('/:leagueId/draft/start', async (req, res) => {
       return res.status(400).json({ error: 'Draft already started or completed' });
     }
 
-    const firstUserId = draftState.league.memberships[0]?.userId;
-    const settings = JSON.parse(draftState.league.settings || '{}');
+    const firstUserId = draftState.group.memberships[0]?.userId;
+    const settings = JSON.parse(draftState.group.settings || '{}');
 
     const updated = await prisma.draftState.update({
       where: { id: draftState.id },

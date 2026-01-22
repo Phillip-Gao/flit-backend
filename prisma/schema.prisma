@@ -44,8 +44,8 @@ model User {
   portfolioHoldings  PortfolioHolding[]
   friendships        UserFriend[]       @relation("User")
   friendRequestsSent UserFriend[]       @relation("Friend")
-  leagueMemberships  LeagueMembership[]
-  adminLeagues       League[]           @relation("LeagueAdmin")
+  groupMemberships   GroupMembership[]
+  adminGroups        Group[]            @relation("GroupAdmin")
   fantasyPortfolios  FantasyPortfolio[]
   draftPicks         DraftPick[]
   trades             Trade[]            @relation("TradeCreator")
@@ -173,7 +173,7 @@ model UserFriend {
   @@map("user_friends")
 }
 
-model League {
+model Group {
   id          String  @id @default(cuid())
   name        String
   description String?
@@ -184,14 +184,14 @@ model League {
   joinCode    String? @unique // 6-character alphanumeric code for joining
 
   // Fantasy Finance Settings (JSON stringified object)
-  settings String? // Contains: leagueSize, seasonLength, draftDate, portfolioSize, activeSlots, benchSlots, scoringMethod, enabledAssetClasses, minAssetPrice, draftType, draftTimePerPick, matchupType, playoffsEnabled, tradeDeadlineWeek, waiverPriority
+  settings String? // Contains: groupSize, seasonLength, draftDate, portfolioSize, activeSlots, benchSlots, scoringMethod, enabledAssetClasses, minAssetPrice, draftType, draftTimePerPick, matchupType, playoffsEnabled, tradeDeadlineWeek, waiverPriority
 
-  // League rules/criteria (JSON)
+  // Group rules/criteria (JSON)
   criteria String? // e.g., {"minScore": 500, "category": "investing"}
 
   // Relationships
-  admin        User               @relation("LeagueAdmin", fields: [adminUserId], references: [id], onDelete: Cascade)
-  memberships  LeagueMembership[]
+  admin        User              @relation("GroupAdmin", fields: [adminUserId], references: [id], onDelete: Cascade)
+  memberships  GroupMembership[]
   draftState   DraftState?
   portfolios   FantasyPortfolio[]
   matchups     Matchup[]
@@ -202,28 +202,28 @@ model League {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@map("leagues")
+  @@map("groups")
 }
 
-model LeagueMembership {
+model GroupMembership {
   id       String   @id @default(cuid())
   userId   String
-  leagueId String
-  rank     Int? // Position in league leaderboard
-  score    Int      @default(0) // League-specific score
+  groupId  String
+  rank     Int? // Position in group leaderboard
+  score    Int      @default(0) // Group-specific score
   joinedAt DateTime @default(now())
   isActive Boolean  @default(true)
 
   // Relationships
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([userId, leagueId])
-  @@map("league_memberships")
+  @@unique([userId, groupId])
+  @@map("group_memberships")
 }
 
 // Fantasy Finance - Asset model
@@ -253,10 +253,10 @@ model Asset {
   @@map("assets")
 }
 
-// Fantasy Finance - Portfolio model (replaces old PortfolioHolding for leagues)
+// Fantasy Finance - Portfolio model (replaces old PortfolioHolding for groups)
 model FantasyPortfolio {
   id                    String  @id @default(cuid())
-  leagueId              String
+  groupId               String
   userId                String
   cashBalance           Decimal @default(0.0)
   totalValue            Decimal @default(0.0)
@@ -264,7 +264,7 @@ model FantasyPortfolio {
   weeklyGainLossPercent Decimal @default(0.0)
 
   // Relationships
-  league       League                      @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  group        Group                       @relation(fields: [groupId], references: [id], onDelete: Cascade)
   user         User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
   slots        PortfolioSlot[]
   transactions FantasyPortfolioTransaction[]
@@ -273,7 +273,7 @@ model FantasyPortfolio {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([leagueId, userId])
+  @@unique([groupId, userId])
   @@map("fantasy_portfolios")
 }
 
@@ -305,7 +305,7 @@ model PortfolioSlot {
 // Fantasy Finance - Draft State
 model DraftState {
   id                   String    @id @default(cuid())
-  leagueId             String    @unique
+  groupId              String    @unique
   status               String // "pending", "active", "paused", "completed"
   currentRound         Int       @default(1)
   currentPickNumber    Int       @default(1)
@@ -314,8 +314,8 @@ model DraftState {
   timerStartedAt       DateTime?
 
   // Relationships
-  league League      @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  picks  DraftPick[]
+  group Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  picks DraftPick[]
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -349,7 +349,7 @@ model DraftPick {
 // Fantasy Finance - Matchups
 model Matchup {
   id         String  @id @default(cuid())
-  leagueId   String
+  groupId    String
   week       Int
   user1Id    String
   user2Id    String? // null for rotisserie or bye weeks
@@ -359,20 +359,20 @@ model Matchup {
   status     String // "pending", "active", "completed"
 
   // Relationships
-  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([leagueId, week, user1Id])
+  @@unique([groupId, week, user1Id])
   @@map("matchups")
 }
 
 // Fantasy Finance - Trades
 model Trade {
   id                String    @id @default(cuid())
-  leagueId          String
+  groupId           String
   creatorId         String
   recipientId       String
   offeredAssetIds   String[] // Array of asset IDs
@@ -381,9 +381,9 @@ model Trade {
   respondedAt       DateTime?
 
   // Relationships
-  league    League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  creator   User   @relation("TradeCreator", fields: [creatorId], references: [id])
-  recipient User   @relation("TradeRecipient", fields: [recipientId], references: [id])
+  group     Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  creator   User  @relation("TradeCreator", fields: [creatorId], references: [id])
+  recipient User  @relation("TradeRecipient", fields: [recipientId], references: [id])
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -395,7 +395,7 @@ model Trade {
 // Fantasy Finance - Waiver Claims
 model WaiverClaim {
   id            String    @id @default(cuid())
-  leagueId      String
+  groupId       String
   userId        String
   assetId       String
   dropAssetId   String? // Asset to drop (optional)
@@ -405,8 +405,8 @@ model WaiverClaim {
   failureReason String?
 
   // Relationships
-  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id])
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id])
 
   // Timestamps
   createdAt DateTime @default(now())

@@ -18,17 +18,17 @@ const sellAssetSchema = z.object({
   shares: z.number().positive(),
 });
 
-// POST /api/fantasy-leagues/:leagueId/buy - Buy an asset
-router.post('/:leagueId/buy', async (req, res) => {
+// POST /api/fantasy-leagues/:groupId/buy - Buy an asset
+router.post('/:groupId/buy', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
     const validated = buyAssetSchema.parse(req.body);
 
     // Get user's portfolio
     const portfolio = await prisma.fantasyPortfolio.findUnique({
       where: {
-        leagueId_userId: {
-          leagueId,
+        groupId_userId: {
+          groupId,
           userId: validated.userId,
         },
       },
@@ -47,27 +47,27 @@ router.post('/:leagueId/buy', async (req, res) => {
       return res.status(404).json({ error: 'Asset not found or inactive' });
     }
 
-    // Check league settings
-    const league = await prisma.league.findUnique({
-      where: { id: leagueId },
+    // Check group settings
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
     });
 
-    if (!league) {
-      return res.status(404).json({ error: 'League not found' });
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
     }
 
-    const settings = league.settings ? JSON.parse(league.settings) : {};
+    const settings = group.settings ? JSON.parse(group.settings) : {};
 
     // Check if trading is enabled
     if (settings.tradingEnabled === false) {
-      return res.status(403).json({ error: 'Trading is disabled for this league' });
+      return res.status(403).json({ error: 'Trading is disabled for this group' });
     }
 
     // Check if asset class is allowed
     if (settings.enabledAssetClasses && settings.enabledAssetClasses.length > 0) {
       if (!settings.enabledAssetClasses.includes(asset.type)) {
         return res.status(403).json({
-          error: `Asset class ${asset.type} is not enabled for this league`
+          error: `Asset class ${asset.type} is not enabled for this group`
         });
       }
     }
@@ -75,7 +75,7 @@ router.post('/:leagueId/buy', async (req, res) => {
     // Check minimum asset price
     if (settings.minAssetPrice && parseFloat(asset.currentPrice.toString()) < settings.minAssetPrice) {
       return res.status(403).json({
-        error: `Asset price is below league minimum of $${settings.minAssetPrice}`
+        error: `Asset price is below group minimum of $${settings.minAssetPrice}`
       });
     }
 
@@ -199,17 +199,17 @@ router.post('/:leagueId/buy', async (req, res) => {
   }
 });
 
-// POST /api/fantasy-leagues/:leagueId/sell - Sell an asset
-router.post('/:leagueId/sell', async (req, res) => {
+// POST /api/fantasy-leagues/:groupId/sell - Sell an asset
+router.post('/:groupId/sell', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
     const validated = sellAssetSchema.parse(req.body);
 
     // Get user's portfolio
     const portfolio = await prisma.fantasyPortfolio.findUnique({
       where: {
-        leagueId_userId: {
-          leagueId,
+        groupId_userId: {
+          groupId,
           userId: validated.userId,
         },
       },
@@ -219,20 +219,20 @@ router.post('/:leagueId/sell', async (req, res) => {
       return res.status(404).json({ error: 'Portfolio not found' });
     }
 
-    // Check league settings
-    const league = await prisma.league.findUnique({
-      where: { id: leagueId },
+    // Check group settings
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
     });
 
-    if (!league) {
-      return res.status(404).json({ error: 'League not found' });
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
     }
 
-    const settings = league.settings ? JSON.parse(league.settings) : {};
+    const settings = group.settings ? JSON.parse(group.settings) : {};
 
     // Check if trading is enabled
     if (settings.tradingEnabled === false) {
-      return res.status(403).json({ error: 'Trading is disabled for this league' });
+      return res.status(403).json({ error: 'Trading is disabled for this group' });
     }
 
     // Get portfolio slot
@@ -326,15 +326,15 @@ router.post('/:leagueId/sell', async (req, res) => {
   }
 });
 
-// GET /api/fantasy-leagues/:leagueId/portfolio/:userId - Get user's portfolio
-router.get('/:leagueId/portfolio/:userId', async (req, res) => {
+// GET /api/fantasy-leagues/:groupId/portfolio/:userId - Get user's portfolio
+router.get('/:groupId/portfolio/:userId', async (req, res) => {
   try {
-    const { leagueId, userId } = req.params;
+    const { groupId, userId } = req.params;
 
     const portfolio = await prisma.fantasyPortfolio.findUnique({
       where: {
-        leagueId_userId: {
-          leagueId,
+        groupId_userId: {
+          groupId,
           userId,
         },
       },
@@ -411,27 +411,27 @@ router.get('/:leagueId/portfolio/:userId', async (req, res) => {
   }
 });
 
-// GET /api/fantasy-leagues/:leagueId/assets - Get available assets for league
-router.get('/:leagueId/assets', async (req, res) => {
+// GET /api/fantasy-leagues/:groupId/assets - Get available assets for group
+router.get('/:groupId/assets', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
     const { type, minPrice, maxPrice, search } = req.query;
 
-    const league = await prisma.league.findUnique({
-      where: { id: leagueId },
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
     });
 
-    if (!league) {
-      return res.status(404).json({ error: 'League not found' });
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
     }
 
-    const settings = league.settings ? JSON.parse(league.settings) : {};
+    const settings = group.settings ? JSON.parse(group.settings) : {};
 
     const where: any = {
       isActive: true,
     };
 
-    // Apply league settings filters
+    // Apply group settings filters
     if (settings.enabledAssetClasses && settings.enabledAssetClasses.length > 0) {
       where.type = { in: settings.enabledAssetClasses };
     }

@@ -28,10 +28,10 @@ const createWaiverClaimSchema = z.object({
 
 // ============ PORTFOLIO ENDPOINTS ============
 
-// GET /api/fantasy-leagues/:leagueId/portfolio - Get user's portfolio for a league
-router.get('/:leagueId/portfolio', async (req, res) => {
+// GET /api/fantasy-leagues/:groupId/portfolio - Get user's portfolio for a group
+router.get('/:groupId/portfolio', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
     const { userId } = req.query;
 
     if (!userId) {
@@ -40,8 +40,8 @@ router.get('/:leagueId/portfolio', async (req, res) => {
 
     const portfolio = await prisma.fantasyPortfolio.findUnique({
       where: {
-        leagueId_userId: {
-          leagueId,
+        groupId_userId: {
+          groupId,
           userId: userId as string,
         },
       },
@@ -90,7 +90,7 @@ router.put('/portfolios/:id/lineup', async (req, res) => {
       where: { id },
       include: {
         slots: true,
-        league: true,
+        group: true,
       },
     });
 
@@ -98,7 +98,7 @@ router.put('/portfolios/:id/lineup', async (req, res) => {
       return res.status(404).json({ error: 'Portfolio not found' });
     }
 
-    const settings = JSON.parse(portfolio.league.settings || '{}');
+    const settings = JSON.parse(portfolio.group.settings || '{}');
     const allSlotIds = [...validated.activeSlotIds, ...validated.benchSlotIds];
 
     // Validate slot counts
@@ -174,10 +174,10 @@ router.put('/portfolios/:id/lineup', async (req, res) => {
 
 // ============ MATCHUP ENDPOINTS ============
 
-// GET /api/fantasy-leagues/:leagueId/matchup/current - Get current week's matchup
-router.get('/:leagueId/matchup/current', async (req, res) => {
+// GET /api/fantasy-leagues/:groupId/matchup/current - Get current week's matchup
+router.get('/:groupId/matchup/current', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
     const { userId } = req.query;
 
     if (!userId) {
@@ -187,7 +187,7 @@ router.get('/:leagueId/matchup/current', async (req, res) => {
     // Find the most recent active or pending matchup for this user
     const matchup = await prisma.matchup.findFirst({
       where: {
-        leagueId,
+        groupId,
         OR: [{ user1Id: userId as string }, { user2Id: userId as string }],
         status: { in: ['pending', 'active'] },
       },
@@ -205,10 +205,10 @@ router.get('/:leagueId/matchup/current', async (req, res) => {
   }
 });
 
-// GET /api/fantasy-leagues/:leagueId/matchup/week/:week - Get specific week's matchup
-router.get('/:leagueId/matchup/week/:week', async (req, res) => {
+// GET /api/fantasy-leagues/:groupId/matchup/week/:week - Get specific week's matchup
+router.get('/:groupId/matchup/week/:week', async (req, res) => {
   try {
-    const { leagueId, week } = req.params;
+    const { groupId, week } = req.params;
     const { userId } = req.query;
 
     if (!userId) {
@@ -217,7 +217,7 @@ router.get('/:leagueId/matchup/week/:week', async (req, res) => {
 
     const matchup = await prisma.matchup.findFirst({
       where: {
-        leagueId,
+        groupId,
         week: parseInt(week),
         OR: [{ user1Id: userId as string }, { user2Id: userId as string }],
       },
@@ -239,13 +239,13 @@ router.get('/:leagueId/matchup/week/:week', async (req, res) => {
 // Players can buy/sell assets directly via the trading endpoints in fantasyTrading.ts
 
 /*
-// GET /api/fantasy-leagues/:leagueId/trades - List active trades
-router.get('/:leagueId/trades', async (req, res) => {
+// GET /api/fantasy-leagues/:groupId/trades - List active trades
+router.get('/:groupId/trades', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
     const { userId } = req.query;
 
-    const where: any = { leagueId };
+    const where: any = { groupId };
 
     if (userId) {
       where.OR = [{ creatorId: userId as string }, { recipientId: userId as string }];
@@ -277,15 +277,15 @@ router.get('/:leagueId/trades', async (req, res) => {
   }
 });
 
-// POST /api/fantasy-leagues/:leagueId/trades - Propose a trade
-router.post('/:leagueId/trades', async (req, res) => {
+// POST /api/fantasy-leagues/:groupId/trades - Propose a trade
+router.post('/:groupId/trades', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
     const validated = createTradeSchema.parse(req.body);
 
     const trade = await prisma.trade.create({
       data: {
-        leagueId,
+        groupId,
         creatorId: validated.creatorId,
         recipientId: validated.recipientId,
         offeredAssetIds: validated.offeredAssetIds,
@@ -389,16 +389,16 @@ router.post('/trades/:id/cancel', async (req, res) => {
 
 // ============ WAIVER ENDPOINTS ============
 
-// POST /api/fantasy-leagues/:leagueId/waivers - Submit a waiver claim
-router.post('/:leagueId/waivers', async (req, res) => {
+// POST /api/fantasy-leagues/:groupId/waivers - Submit a waiver claim
+router.post('/:groupId/waivers', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
     const validated = createWaiverClaimSchema.parse(req.body);
 
     // Get current waiver priority
     const existingClaims = await prisma.waiverClaim.findMany({
       where: {
-        leagueId,
+        groupId,
         status: 'pending',
       },
       select: { priority: true },
@@ -410,7 +410,7 @@ router.post('/:leagueId/waivers', async (req, res) => {
 
     const claim = await prisma.waiverClaim.create({
       data: {
-        leagueId,
+        groupId,
         userId: validated.userId,
         assetId: validated.assetId,
         dropAssetId: validated.dropAssetId,
@@ -458,15 +458,15 @@ router.get('/assets/:id', async (req, res) => {
   }
 });
 
-// GET /api/fantasy-leagues/:leagueId/market/assets - Search available assets
-router.get('/:leagueId/market/assets', async (req, res) => {
+// GET /api/fantasy-leagues/:groupId/market/assets - Search available assets
+router.get('/:groupId/market/assets', async (req, res) => {
   try {
-    const { leagueId } = req.params;
+    const { groupId } = req.params;
     const { type, minPrice, maxPrice, search } = req.query;
 
-    // Get all owned assets in this league
+    // Get all owned assets in this group
     const portfolios = await prisma.fantasyPortfolio.findMany({
-      where: { leagueId },
+      where: { groupId },
       include: {
         slots: {
           select: { assetId: true },
