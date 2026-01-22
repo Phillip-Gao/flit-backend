@@ -29,6 +29,134 @@ const updateUserSchema = z.object({
   totalLearningDollars: z.number().min(0).optional(),
 });
 
+// Schema for syncing user from Clerk
+const syncUserSchema = z.object({
+  clerkId: z.string().min(1, 'Clerk ID is required'),
+  email: z.string().email('Invalid email format'),
+  username: z.string().min(1, 'Username is required'),
+  firstName: z.string().optional().nullable(),
+  lastName: z.string().optional().nullable(),
+});
+
+// POST /users/sync - Create or update user from Clerk authentication
+router.post('/sync', async (req: Request, res: Response) => {
+  try {
+    const validatedData = syncUserSchema.parse(req.body);
+
+    // Check if user already exists with this Clerk ID
+    let user = await prisma.user.findUnique({
+      where: { clerkId: validatedData.clerkId },
+    });
+
+    if (user) {
+      // Update existing user with latest info from Clerk
+      user = await prisma.user.update({
+        where: { clerkId: validatedData.clerkId },
+        data: {
+          email: validatedData.email,
+          firstName: validatedData.firstName || undefined,
+          lastName: validatedData.lastName || undefined,
+          lastLoginAt: new Date(),
+        },
+      });
+
+      return res.json({
+        message: 'User synced successfully',
+        user: {
+          id: user.id,
+          clerkId: user.clerkId,
+          email: user.email,
+          username: user.username,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          onboardingComplete: user.onboardingComplete,
+        },
+      });
+    }
+
+    // Check if email or username already exists (without Clerk ID)
+    const existingByEmail = await prisma.user.findUnique({
+      where: { email: validatedData.email },
+    });
+
+    if (existingByEmail) {
+      // Link existing user to Clerk account
+      user = await prisma.user.update({
+        where: { email: validatedData.email },
+        data: {
+          clerkId: validatedData.clerkId,
+          firstName: validatedData.firstName || existingByEmail.firstName,
+          lastName: validatedData.lastName || existingByEmail.lastName,
+          lastLoginAt: new Date(),
+        },
+      });
+
+      return res.json({
+        message: 'User linked to Clerk account',
+        user: {
+          id: user.id,
+          clerkId: user.clerkId,
+          email: user.email,
+          username: user.username,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          onboardingComplete: user.onboardingComplete,
+        },
+      });
+    }
+
+    // Generate a unique username if needed
+    let username = validatedData.username;
+    const existingByUsername = await prisma.user.findUnique({
+      where: { username },
+    });
+
+    if (existingByUsername) {
+      // Append random suffix to make username unique
+      username = `${username}_${Math.random().toString(36).substring(2, 6)}`;
+    }
+
+    // Create new user
+    user = await prisma.user.create({
+      data: {
+        clerkId: validatedData.clerkId,
+        email: validatedData.email,
+        username,
+        firstName: validatedData.firstName || undefined,
+        lastName: validatedData.lastName || undefined,
+        emailVerified: true, // Email verified through Clerk
+        lastLoginAt: new Date(),
+      },
+    });
+
+    res.status(201).json({
+      message: 'User created successfully',
+      user: {
+        id: user.id,
+        clerkId: user.clerkId,
+        email: user.email,
+        username: user.username,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        onboardingComplete: user.onboardingComplete,
+      },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: error.issues,
+      });
+    }
+
+    console.error('Sync user error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to sync user',
+    });
+  }
+});
+
 // GET /users - Get all users with optional pagination
 router.get('/', async (req: Request, res: Response) => {
   try {
