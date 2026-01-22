@@ -262,6 +262,11 @@ model FantasyPortfolio {
   totalValue            Decimal @default(0.0)
   weeklyGainLoss        Decimal @default(0.0)
   weeklyGainLossPercent Decimal @default(0.0)
+  
+  // Other asset allocations
+  savingsAccount        Decimal @default(0.0)
+  bonds                 Decimal @default(0.0)
+  indexFunds            Decimal @default(0.0)
 
   // Relationships
   group        Group                       @relation(fields: [groupId], references: [id], onDelete: Cascade)
