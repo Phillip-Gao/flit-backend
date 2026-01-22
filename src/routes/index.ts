@@ -6,6 +6,8 @@ import socialRoutes from './social';
 import fantasyGroupsRoutes from './fantasyGroups';
 import fantasyFeaturesRoutes from './fantasyFeatures';
 import fantasyTradingRoutes from './fantasyTrading';
+import fantasyPortfolioRoutes from './fantasyPortfolio';
+import assetsRoutes from './assets';
 
 const router = Router();
 
@@ -21,9 +23,13 @@ router.use('/portfolio', portfolioRoutes);
 // Social features routes
 router.use('/social', socialRoutes);
 
+// Asset management routes
+router.use('/assets', assetsRoutes);
+
 // Fantasy Finance routes
 router.use('/fantasy-groups', fantasyTradingRoutes);
 router.use('/fantasy-groups', fantasyGroupsRoutes);
 router.use('/fantasy', fantasyFeaturesRoutes);
+router.use('/fantasy-portfolio', fantasyPortfolioRoutes);
 
 export default router;
