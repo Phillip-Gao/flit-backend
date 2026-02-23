@@ -16,6 +16,7 @@ datasource db {
 // User model for the Flit financial literacy app
 model User {
   id          String    @id @default(cuid())
+  clerkId     String?   @unique // Clerk authentication ID
   email       String    @unique
   username    String    @unique
   firstName   String?
