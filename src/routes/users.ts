@@ -19,7 +19,13 @@ const updateUserSchema = z.object({
   username: z.string().min(3).max(20).optional(),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
-  dateOfBirth: z.string().datetime().optional(),
+  dateOfBirth: z
+    .string()
+    .optional()
+    .refine((val) => !val || /^\d{4}-\d{2}-\d{2}$/.test(val) || /^\d{4}-\d{2}-\d{2}T/.test(val ?? ''), {
+      message: 'Date must be in YYYY-MM-DD or ISO format',
+    })
+    .transform((val) => (val ? new Date(val.includes('T') ? val : val + 'T00:00:00.000Z') : undefined)),
   phoneNumber: z.string().optional(),
   emailVerified: z.boolean().optional(),
   phoneVerified: z.boolean().optional(),
@@ -29,13 +35,20 @@ const updateUserSchema = z.object({
   totalLearningDollars: z.number().min(0).optional(),
 });
 
-// Schema for syncing user from Clerk
+// Schema for syncing user from Clerk (profile fields optional for sign-in of existing users)
 const syncUserSchema = z.object({
   clerkId: z.string().min(1, 'Clerk ID is required'),
   email: z.string().email('Invalid email format'),
-  username: z.string().min(1, 'Username is required'),
-  firstName: z.string().optional().nullable(),
-  lastName: z.string().optional().nullable(),
+  username: z.string().min(3, 'Username must be at least 3 characters').optional(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  dateOfBirth: z
+    .string()
+    .optional()
+    .refine((val) => !val || /^\d{4}-\d{2}-\d{2}$/.test(val), {
+      message: 'Date must be in YYYY-MM-DD format',
+    })
+    .transform((val) => (val ? new Date(val + 'T00:00:00.000Z') : undefined)),
 });
 
 // POST /users/sync - Create or update user from Clerk authentication
@@ -49,15 +62,18 @@ router.post('/sync', async (req: Request, res: Response) => {
     });
 
     if (user) {
-      // Update existing user with latest info from Clerk
+      // Update existing user with latest info from Clerk (sign-in - only update what we have)
+      const updateData: Record<string, unknown> = {
+        email: validatedData.email,
+        lastLoginAt: new Date(),
+      };
+      if (validatedData.firstName !== undefined) updateData.firstName = validatedData.firstName;
+      if (validatedData.lastName !== undefined) updateData.lastName = validatedData.lastName;
+      if (validatedData.dateOfBirth !== undefined) updateData.dateOfBirth = validatedData.dateOfBirth;
+
       user = await prisma.user.update({
         where: { clerkId: validatedData.clerkId },
-        data: {
-          email: validatedData.email,
-          firstName: validatedData.firstName || undefined,
-          lastName: validatedData.lastName || undefined,
-          lastLoginAt: new Date(),
-        },
+        data: updateData,
       });
 
       return res.json({
@@ -87,6 +103,7 @@ router.post('/sync', async (req: Request, res: Response) => {
           clerkId: validatedData.clerkId,
           firstName: validatedData.firstName || existingByEmail.firstName,
           lastName: validatedData.lastName || existingByEmail.lastName,
+          dateOfBirth: validatedData.dateOfBirth ?? existingByEmail.dateOfBirth,
           lastLoginAt: new Date(),
         },
       });
@@ -105,15 +122,23 @@ router.post('/sync', async (req: Request, res: Response) => {
       });
     }
 
-    // Generate a unique username if needed
-    let username = validatedData.username;
+    // New user creation requires full profile from sign-up form
+    if (!validatedData.username || !validatedData.firstName || !validatedData.lastName || !validatedData.dateOfBirth) {
+      return res.status(400).json({
+        error: 'Incomplete sign-up',
+        message: 'Please complete sign-up through the app to create your account.',
+      });
+    }
+
     const existingByUsername = await prisma.user.findUnique({
-      where: { username },
+      where: { username: validatedData.username },
     });
 
     if (existingByUsername) {
-      // Append random suffix to make username unique
-      username = `${username}_${Math.random().toString(36).substring(2, 6)}`;
+      return res.status(400).json({
+        error: 'Username taken',
+        message: 'This username is already in use. Please choose another.',
+      });
     }
 
     // Create new user
@@ -121,9 +146,10 @@ router.post('/sync', async (req: Request, res: Response) => {
       data: {
         clerkId: validatedData.clerkId,
         email: validatedData.email,
-        username,
-        firstName: validatedData.firstName || undefined,
-        lastName: validatedData.lastName || undefined,
+        username: validatedData.username!,
+        firstName: validatedData.firstName!,
+        lastName: validatedData.lastName!,
+        dateOfBirth: validatedData.dateOfBirth!,
         emailVerified: true, // Email verified through Clerk
         lastLoginAt: new Date(),
       },
