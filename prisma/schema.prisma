@@ -35,7 +35,7 @@ model User {
   // Lesson Progress Tracking
   currentUnit          Int     @default(1) // Current unit the user is on
   currentLesson        Int     @default(1) // Current lesson within the unit
-  learningDollarsEarned Decimal @default(500.0) // Total learning dollars earned (starts at 500)
+  learningDollarsEarned Decimal @default(50000.0) // Total learning dollars earned (starts at 50000 for testing)
 
   // Fantasy Finance - Completed lessons for asset gating
   completedLessons String[] @default([])
