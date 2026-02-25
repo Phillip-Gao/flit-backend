@@ -137,6 +137,33 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// GET /api/lessons/progress/:userId - Get all lesson progress for a user
+router.get('/progress/:userId/all', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const userLessons = await prisma.userLesson.findMany({
+      where: { userId },
+      include: {
+        lesson: {
+          select: {
+            id: true,
+            title: true,
+            category: true,
+            rewardDollars: true
+          }
+        }
+      },
+      orderBy: { updatedAt: 'desc' }
+    });
+
+    res.json(userLessons);
+  } catch (error) {
+    console.error('Error fetching user lesson progress:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/lessons/:id/progress/:userId - Get user's progress on a lesson
 router.get('/:id/progress/:userId', async (req, res) => {
   try {
@@ -249,6 +276,70 @@ router.put('/:id/progress/:userId', async (req, res) => {
       return res.status(400).json({ error: 'Invalid input', details: error.issues });
     }
     console.error('Error updating lesson progress:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/lessons/progress/:userId/sync - Bulk sync lesson progress
+router.post('/progress/:userId/sync', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { lessons } = req.body; // Array of { lessonId, courseId, status, score, totalQuestions }
+
+    if (!Array.isArray(lessons)) {
+      return res.status(400).json({ error: 'Lessons must be an array' });
+    }
+
+    // Check if user exists
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const results = [];
+    let totalRewards = 0;
+
+    for (const lessonData of lessons) {
+      const { lessonId, status, score, totalQuestions } = lessonData;
+
+      // For now, we're using frontend lesson IDs which may not match backend
+      // We'll upsert with the provided data
+      if (status === 'completed') {
+        const progress = totalQuestions > 0 ? Math.round((score / totalQuestions) * 100) : 100;
+
+        const userLesson = await prisma.userLesson.upsert({
+          where: {
+            userId_lessonId: {
+              userId,
+              lessonId: lessonId || `frontend_${Date.now()}_${Math.random()}`
+            }
+          },
+          update: {
+            status,
+            progress,
+            score,
+            completedAt: new Date()
+          },
+          create: {
+            userId,
+            lessonId: lessonId || `frontend_${Date.now()}_${Math.random()}`,
+            status,
+            progress,
+            score,
+            completedAt: new Date()
+          }
+        });
+
+        results.push(userLesson);
+      }
+    }
+
+    res.json({ 
+      synced: results.length,
+      message: 'Lesson progress synced successfully'
+    });
+  } catch (error) {
+    console.error('Error syncing lesson progress:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
