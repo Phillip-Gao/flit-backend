@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../services/prisma';
+import { updateUserGamificationStats } from '../services/gamification';
 
 const router = Router();
 
@@ -144,16 +145,6 @@ router.get('/progress/:userId/all', async (req, res) => {
 
     const userLessons = await prisma.userLesson.findMany({
       where: { userId },
-      include: {
-        lesson: {
-          select: {
-            id: true,
-            title: true,
-            category: true,
-            rewardDollars: true
-          }
-        }
-      },
       orderBy: { updatedAt: 'desc' }
     });
 
@@ -175,34 +166,17 @@ router.get('/:id/progress/:userId', async (req, res) => {
           userId,
           lessonId
         }
-      },
-      include: {
-        lesson: {
-          select: {
-            title: true,
-            estimatedTime: true,
-            rewardDollars: true
-          }
-        }
       }
     });
 
     if (!userLesson) {
       // Return default progress if not started
-      const lesson = await prisma.lesson.findUnique({
-        where: { id: lessonId },
-        select: { title: true, estimatedTime: true, rewardDollars: true }
-      });
-      
-      if (!lesson) {
-        return res.status(404).json({ error: 'Lesson not found' });
-      }
-
+      // Note: lesson data is now managed by frontend
       return res.json({
+        lessonId,
         status: 'not_started',
         progress: 0,
-        timeSpent: 0,
-        lesson
+        timeSpent: 0
       });
     }
 
@@ -219,14 +193,11 @@ router.put('/:id/progress/:userId', async (req, res) => {
     const { id: lessonId, userId } = req.params;
     const validatedData = updateUserLessonSchema.parse(req.body);
 
-    // Check if lesson and user exist
-    const [lesson, user] = await Promise.all([
-      prisma.lesson.findUnique({ where: { id: lessonId } }),
-      prisma.user.findUnique({ where: { id: userId } })
-    ]);
+    // Check if user exists
+    const user = await prisma.user.findUnique({ where: { id: userId } });
 
-    if (!lesson || !user) {
-      return res.status(404).json({ error: 'Lesson or user not found' });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
     }
 
     // Set completedAt if status is completed
@@ -247,27 +218,18 @@ router.put('/:id/progress/:userId', async (req, res) => {
         userId,
         lessonId,
         ...updateData
-      },
-      include: {
-        lesson: {
-          select: {
-            title: true,
-            rewardDollars: true
-          }
-        }
       }
     });
 
-    // Award learning dollars if lesson is completed
+    // Update gamification stats if lesson is completed
     if (validatedData.status === 'completed') {
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          totalLearningDollars: {
-            increment: lesson.rewardDollars
-          }
-        }
-      });
+      // Update Financial IQ and Daily Streak
+      try {
+        await updateUserGamificationStats(userId);
+      } catch (error) {
+        console.error('Error updating gamification stats:', error);
+        // Don't fail the request if gamification update fails
+      }
     }
 
     res.json(userLesson);
@@ -286,6 +248,8 @@ router.post('/progress/:userId/sync', async (req, res) => {
     const { userId } = req.params;
     const { lessons } = req.body; // Array of { lessonId, courseId, status, score, totalQuestions }
 
+    console.log(`[Lesson Sync] Received request for userId: ${userId}, lessons:`, lessons);
+
     if (!Array.isArray(lessons)) {
       return res.status(400).json({ error: 'Lessons must be an array' });
     }
@@ -293,6 +257,7 @@ router.post('/progress/:userId/sync', async (req, res) => {
     // Check if user exists
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
+      console.log(`[Lesson Sync] User not found: ${userId}`);
       return res.status(404).json({ error: 'User not found' });
     }
 
@@ -306,6 +271,8 @@ router.post('/progress/:userId/sync', async (req, res) => {
       // We'll upsert with the provided data
       if (status === 'completed') {
         const progress = totalQuestions > 0 ? Math.round((score / totalQuestions) * 100) : 100;
+
+        console.log(`[Lesson Sync] Creating/updating lesson ${lessonId} for user ${userId}`);
 
         const userLesson = await prisma.userLesson.upsert({
           where: {
@@ -331,15 +298,47 @@ router.post('/progress/:userId/sync', async (req, res) => {
         });
 
         results.push(userLesson);
+        console.log(`[Lesson Sync] Successfully saved lesson ${lessonId}`);
       }
+    }
+
+    console.log(`[Lesson Sync] Synced ${results.length} lessons`);
+
+    // Update gamification stats after syncing completed lessons
+    let statsUpdate = null;
+    if (results.length > 0) {
+      try {
+        console.log(`[Lesson Sync] Updating gamification stats for user ${userId}...`);
+        
+        // Get current stats before update
+        const userBefore = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { financialIQScore: true, learningStreak: true }
+        });
+        
+        const stats = await updateUserGamificationStats(userId);
+        console.log(`[Lesson Sync] ✅ Gamification stats updated:`, stats);
+        
+        statsUpdate = {
+          financialIQScore: stats.financialIQScore,
+          learningStreak: stats.learningStreak,
+          financialIQEarned: stats.financialIQScore - (userBefore?.financialIQScore || 500),
+        };
+      } catch (error) {
+        console.error('[Lesson Sync] ❌ Error updating gamification stats:', error);
+        // Don't fail the request if gamification update fails
+      }
+    } else {
+      console.log('[Lesson Sync] No lessons synced, skipping gamification update');
     }
 
     res.json({ 
       synced: results.length,
-      message: 'Lesson progress synced successfully'
+      message: 'Lesson progress synced successfully',
+      stats: statsUpdate
     });
   } catch (error) {
-    console.error('Error syncing lesson progress:', error);
+    console.error('[Lesson Sync] Error syncing lesson progress:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -55,9 +55,10 @@ model User {
   notifications      Notification[]
 
   // Timestamps
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  lastLoginAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  lastLoginAt      DateTime?
+  lastActivityDate DateTime? // Last date user completed a lesson (for streak calculation)
 
   @@map("users")
 }
@@ -77,8 +78,7 @@ model Lesson {
   isActive      Boolean @default(true)
   order         Int     @default(0)
 
-  // Relationships
-  userLessons UserLesson[]
+  // Note: UserLesson relationship removed to allow frontend-managed lessons
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -91,7 +91,7 @@ model Lesson {
 model UserLesson {
   id          String    @id @default(cuid())
   userId      String
-  lessonId    String
+  lessonId    String // Can be frontend lesson ID (e.g., "lesson_credit_cards") or backend lesson cuid
   status      String // "not_started", "in_progress", "completed"
   progress    Int       @default(0) // percentage 0-100
   score       Int? // quiz score if applicable
@@ -100,7 +100,7 @@ model UserLesson {
 
   // Relationships
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  // Note: lessonId is not a foreign key to allow frontend-managed lessons
 
   // Timestamps
   createdAt DateTime @default(now())

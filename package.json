@@ -32,6 +32,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
+    "node-cron": "^4.2.1",
     "zod": "^4.1.12"
   },
   "devDependencies": {
@@ -40,6 +41,7 @@
     "@types/express": "^5.0.5",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.0",
+    "@types/node-cron": "^3.0.11",
     "nodemon": "^3.1.10",
     "prisma": "^6.19.0",
     "ts-node": "^10.9.2",
