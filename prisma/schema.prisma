@@ -53,6 +53,7 @@ model User {
   tradeRecipients    Trade[]            @relation("TradeRecipient")
   waiverClaims       WaiverClaim[]
   notifications      Notification[]
+  watchlistItems     WatchlistItem[]
 
   // Timestamps
   createdAt        DateTime  @default(now())
@@ -291,7 +292,7 @@ model FantasyPortfolio {
 model FantasyPortfolioSnapshot {
   id          String   @id @default(cuid())
   portfolioId String
-  date        DateTime // Date of snapshot (one per day at market close)
+  date        DateTime // Timestamp of snapshot (hourly snapshots when prices update)
   totalValue  Decimal  // Total portfolio value
   cashBalance Decimal  // Cash portion
   stockValue  Decimal  // Stock holdings value
@@ -310,7 +311,7 @@ model FantasyPortfolioSnapshot {
 
   createdAt DateTime @default(now())
 
-  @@unique([portfolioId, date]) // One snapshot per portfolio per day
+  @@unique([portfolioId, date]) // One snapshot per portfolio per hour
   @@index([portfolioId, date])
   @@map("fantasy_portfolio_snapshots")
 }
@@ -507,4 +508,20 @@ model FantasyPortfolioTransaction {
   createdAt DateTime @default(now())
 
   @@map("fantasy_portfolio_transactions")
+}
+
+// Watchlist - User's stock watchlist
+model WatchlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  symbol    String   // Stock ticker symbol
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@unique([userId, symbol]) // Each user can only have one entry per symbol
+  @@map("watchlist_items")
 }

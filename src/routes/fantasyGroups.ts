@@ -215,6 +215,29 @@ router.post('/', async (req, res) => {
   try {
     const validated = createGroupSchema.parse(req.body);
 
+    // Get user to check learning dollars
+    const user = await prisma.user.findUnique({
+      where: { id: validated.adminUserId },
+      select: { learningDollarsEarned: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const startingBalance = validated.settings.startingBalance || 10000;
+
+    // Validate user has enough learning dollars to create group with this starting balance
+    const userLearningDollars = Number(user.learningDollarsEarned);
+    if (userLearningDollars < startingBalance) {
+      return res.status(403).json({ 
+        error: 'Insufficient learning dollars',
+        message: `You need at least $${startingBalance} in learning dollars to create a group with this starting balance. You currently have $${userLearningDollars}. Complete more lessons to earn learning dollars!`,
+        required: startingBalance,
+        available: userLearningDollars
+      });
+    }
+
     // Generate a unique join code
     let joinCode = generateJoinCode();
     let codeExists = await prisma.group.findUnique({ where: { joinCode } });
@@ -408,12 +431,13 @@ router.post('/join-by-code', async (req, res) => {
     const startingBalance = settings.startingBalance || 10000;
 
     // Validate user has enough learning dollars
-    if (user.learningDollarsEarned < startingBalance) {
+    const userLearningDollars = Number(user.learningDollarsEarned);
+    if (userLearningDollars < startingBalance) {
       return res.status(403).json({ 
         error: 'Insufficient learning dollars',
-        message: `You need at least $${startingBalance} in learning dollars to join this group. You currently have $${user.learningDollarsEarned}. Complete more lessons to earn learning dollars!`,
+        message: `You need at least $${startingBalance} in learning dollars to join this group. You currently have $${userLearningDollars}. Complete more lessons to earn learning dollars!`,
         required: startingBalance,
-        available: user.learningDollarsEarned
+        available: userLearningDollars
       });
     }
 
@@ -880,6 +904,30 @@ router.post('/tournaments/:id/join', async (req, res) => {
       return res.status(400).json({ error: 'Tournament is full' });
     }
 
+    // Get user to check learning dollars
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { learningDollarsEarned: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const settings = tournament.settings ? JSON.parse(tournament.settings) : {};
+    const startingBalance = settings.startingBalance || 10000;
+
+    // Validate user has enough learning dollars
+    const userLearningDollars = Number(user.learningDollarsEarned);
+    if (userLearningDollars < startingBalance) {
+      return res.status(403).json({ 
+        error: 'Insufficient learning dollars',
+        message: `You need at least $${startingBalance} in learning dollars to join this tournament. You currently have $${userLearningDollars}. Complete more lessons to earn learning dollars!`,
+        required: startingBalance,
+        available: userLearningDollars
+      });
+    }
+
     // Check if user is already a member
     const existingMembership = await prisma.groupMembership.findUnique({
       where: {
@@ -903,13 +951,12 @@ router.post('/tournaments/:id/join', async (req, res) => {
     });
 
     // Create portfolio for the user
-    const settings = tournament.settings ? JSON.parse(tournament.settings) : {};
     await prisma.fantasyPortfolio.create({
       data: {
         userId,
         groupId: id,
-        cashBalance: settings.startingBalance || 10000,
-        totalValue: settings.startingBalance || 10000,
+        cashBalance: startingBalance,
+        totalValue: startingBalance,
       },
     });
 

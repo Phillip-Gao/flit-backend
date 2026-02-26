@@ -8,6 +8,8 @@ import fantasyFeaturesRoutes from './fantasyFeatures';
 import fantasyTradingRoutes from './fantasyTrading';
 import fantasyPortfolioRoutes from './fantasyPortfolio';
 import assetsRoutes from './assets';
+import watchlistRoutes from './watchlist';
+import exploreRoutes from './explore';
 
 const router = Router();
 
@@ -25,6 +27,12 @@ router.use('/social', socialRoutes);
 
 // Asset management routes
 router.use('/assets', assetsRoutes);
+
+// Watchlist routes
+router.use('/watchlist', watchlistRoutes);
+
+// Explore page routes
+router.use('/explore', exploreRoutes);
 
 // Fantasy Finance routes
 router.use('/fantasy-groups', fantasyTradingRoutes);

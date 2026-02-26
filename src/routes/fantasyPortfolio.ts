@@ -543,6 +543,40 @@ router.get('/:groupId/history', async (req, res) => {
       end
     );
 
+    // Handle edge case: if we have limited data, add current portfolio state as a data point
+    if (history.length === 0) {
+      // No snapshots yet - return current portfolio value as single data point
+      const currentValue = Number(portfolio.totalValue);
+      const currentCash = Number(portfolio.cashBalance);
+      
+      // Calculate stock value from current holdings
+      const portfolioWithSlots = await prisma.fantasyPortfolio.findUnique({
+        where: { id: portfolio.id },
+        include: { slots: { include: { asset: true } } },
+      });
+      const currentStockValue = portfolioWithSlots?.slots.reduce((sum, slot) => 
+        sum + Number(slot.shares) * Number(slot.asset.currentPrice), 0) || 0;
+      
+      const initialValue = Number(portfolio.initialValue);
+      const now = new Date();
+      
+      // Calculate what S&P 500 baseline would be
+      const daysSinceCreation = (now.getTime() - portfolio.createdAt.getTime()) / (1000 * 60 * 60 * 24);
+      const sp500Value = initialValue * Math.pow(1.10, daysSinceCreation / 365);
+      
+      history.push({
+        date: now,
+        totalValue: currentValue,
+        cashBalance: currentCash,
+        stockValue: currentStockValue,
+        dayChange: currentValue - initialValue,
+        dayChangePercent: ((currentValue - initialValue) / initialValue) * 100,
+        sp500Value,
+        nasdaqValue: initialValue * Math.pow(1.12, daysSinceCreation / 365),
+        dowValue: initialValue * Math.pow(1.08, daysSinceCreation / 365),
+      });
+    }
+
     res.json({
       portfolioId: portfolio.id,
       groupId,
