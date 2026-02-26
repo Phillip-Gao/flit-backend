@@ -1,19 +1,24 @@
 /**
  * Current User Service
- * Tracks the currently logged-in user (hardcoded to phillipgao for now)
- * TODO: Replace with proper authentication system later
+ * Gets the authenticated user from the request context
  */
 
+import { Request } from 'express';
 import prisma from './prisma';
 
 /**
- * Get the current logged-in user
- * For now, this is hardcoded to phillipgao
- * TODO: Replace with actual authentication/session management
+ * Get the current logged-in user from request
+ * Requires that requireAuth or optionalAuth middleware has been applied
  */
-export async function getCurrentUser() {
+export async function getCurrentUser(req: Request) {
+  const userId = req.userId;
+
+  if (!userId) {
+    throw new Error('User not authenticated. Please sign in.');
+  }
+
   const user = await prisma.user.findUnique({
-    where: { username: 'phillipgao' },
+    where: { id: userId },
     include: {
       fantasyPortfolios: {
         include: {
@@ -34,33 +39,38 @@ export async function getCurrentUser() {
   });
 
   if (!user) {
-    throw new Error('User phillipgao not found. Please run seed script.');
+    throw new Error('User not found in database.');
   }
 
   return user;
 }
 
 /**
- * Get current user's ID
+ * Get current user's ID from request
  */
-export async function getCurrentUserId(): Promise<string> {
-  const user = await getCurrentUser();
-  return user.id;
+export async function getCurrentUserId(req: Request): Promise<string> {
+  const userId = req.userId;
+
+  if (!userId) {
+    throw new Error('User not authenticated. Please sign in.');
+  }
+
+  return userId;
 }
 
 /**
  * Get current user's portfolios
  */
-export async function getCurrentUserPortfolios() {
-  const user = await getCurrentUser();
+export async function getCurrentUserPortfolios(req: Request) {
+  const user = await getCurrentUser(req);
   return user.fantasyPortfolios;
 }
 
 /**
  * Get specific portfolio by group ID for current user
  */
-export async function getCurrentUserPortfolioByGroup(groupId: string) {
-  const user = await getCurrentUser();
+export async function getCurrentUserPortfolioByGroup(req: Request, groupId: string) {
+  const user = await getCurrentUser(req);
   const portfolio = user.fantasyPortfolios.find((p) => p.groupId === groupId);
   
   if (!portfolio) {

@@ -261,6 +261,7 @@ model FantasyPortfolio {
   userId                String
   cashBalance           Decimal @default(0.0)
   totalValue            Decimal @default(0.0)
+  initialValue          Decimal @default(10000.0) // Starting value for baseline comparisons
   weeklyGainLoss        Decimal @default(0.0)
   weeklyGainLossPercent Decimal @default(0.0)
   
@@ -279,8 +280,54 @@ model FantasyPortfolio {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Relationships
+  snapshots FantasyPortfolioSnapshot[]
+
   @@unique([groupId, userId])
   @@map("fantasy_portfolios")
+}
+
+// Daily snapshot of portfolio value for historical performance tracking
+model FantasyPortfolioSnapshot {
+  id          String   @id @default(cuid())
+  portfolioId String
+  date        DateTime // Date of snapshot (one per day at market close)
+  totalValue  Decimal  // Total portfolio value
+  cashBalance Decimal  // Cash portion
+  stockValue  Decimal  // Stock holdings value
+
+  // Daily performance metrics
+  dayChange        Decimal @default(0.0) // $ change from previous day
+  dayChangePercent Decimal @default(0.0) // % change from previous day
+
+  // Benchmark values (what initial cash would be worth if invested in index)
+  sp500Value   Decimal? // S&P 500 baseline (SPY)
+  nasdaqValue  Decimal? // NASDAQ baseline (QQQ)
+  dowValue     Decimal? // Dow Jones baseline (DIA)
+
+  // Relationships
+  portfolio FantasyPortfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([portfolioId, date]) // One snapshot per portfolio per day
+  @@index([portfolioId, date])
+  @@map("fantasy_portfolio_snapshots")
+}
+
+// Market indices for baseline comparison
+model MarketIndex {
+  id           String   @id @default(cuid())
+  symbol       String   @unique // "SPY", "QQQ", "DIA"
+  name         String // "S&P 500", "NASDAQ-100", "Dow Jones"
+  currentPrice Decimal
+  previousClose Decimal @default(0.0)
+  changePercent Decimal @default(0.0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("market_indices")
 }
 
 model PortfolioSlot {

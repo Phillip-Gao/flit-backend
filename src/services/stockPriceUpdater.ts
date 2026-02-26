@@ -97,6 +97,9 @@ class StockPriceUpdater {
       // Update portfolio values based on new prices
       await this.recalculatePortfolioValues();
 
+      // Update market indices (SPY, QQQ, DIA) for baseline comparisons
+      await this.updateMarketIndices();
+
       return {
         updated: true,
         message: `Successfully updated ${updatedCount} stock prices`,
@@ -200,6 +203,45 @@ class StockPriceUpdater {
       console.log(`✅ Recalculated ${portfolios.length} portfolio values`);
     } catch (error) {
       console.error('Error recalculating portfolio values:', error);
+    }
+  }
+
+  /**
+   * Update market indices (SPY, QQQ, DIA) for baseline comparisons
+   */
+  private async updateMarketIndices(): Promise<void> {
+    try {
+      const indices = ['SPY', 'QQQ', 'DIA'];
+      
+      for (const symbol of indices) {
+        try {
+          const quote = await finnhubService.getQuote(symbol);
+          
+          if (quote && typeof quote.currentPrice === 'number') {
+            await prisma.marketIndex.upsert({
+              where: { symbol },
+              update: {
+                currentPrice: quote.currentPrice,
+                previousClose: quote.previousClose || quote.currentPrice,
+                changePercent: quote.changePercent || 0,
+              },
+              create: {
+                symbol,
+                name: symbol === 'SPY' ? 'S&P 500' : symbol === 'QQQ' ? 'NASDAQ-100' : 'Dow Jones',
+                currentPrice: quote.currentPrice,
+                previousClose: quote.previousClose || quote.currentPrice,
+                changePercent: quote.changePercent || 0,
+              },
+            });
+          }
+        } catch (error) {
+          console.error(`Error updating market index ${symbol}:`, error);
+        }
+      }
+
+      console.log(`✅ Updated market indices (SPY, QQQ, DIA)`);
+    } catch (error) {
+      console.error('Error updating market indices:', error);
     }
   }
 }

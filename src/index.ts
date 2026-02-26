@@ -5,6 +5,7 @@ import { clerkMiddleware } from '@clerk/express';
 import cron from 'node-cron';
 import prisma from './services/prisma';
 import { stockPriceUpdater } from './services/stockPriceUpdater';
+import { portfolioSnapshotService } from './services/portfolioSnapshotService';
 
 // Load environment variables
 dotenv.config();
@@ -104,8 +105,24 @@ function initializeScheduledTasks() {
     }
   });
 
+  // Take daily portfolio snapshots at 4:15 PM ET (after market close at 4:00 PM)
+  // This runs once per day after the market closes
+  cron.schedule('15 16 * * *', async () => {
+    const timestamp = new Date().toISOString();
+    console.log(`\n📸 [${timestamp}] Taking daily portfolio snapshots...`);
+    
+    try {
+      await portfolioSnapshotService.takeDailySnapshots();
+      console.log(`✅ [${timestamp}] Daily snapshots completed successfully\n`);
+    } catch (error) {
+      console.error(`❌ [${timestamp}] Daily snapshots failed:`, error);
+    }
+  });
+
   console.log('✅ Scheduled task registered: Stock price updates every hour');
   console.log('   Next update will run at the top of the next hour (e.g., 2:00, 3:00, 4:00...)');
+  console.log('✅ Scheduled task registered: Daily portfolio snapshots at 4:15 PM ET');
+  console.log('   Snapshots capture portfolio values after market close');
 }
 
 export default app;
