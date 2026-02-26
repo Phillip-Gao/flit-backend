@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../services/prisma';
+import { portfolioSnapshotService } from '../services/portfolioSnapshotService';
 
 const router = Router();
 
@@ -295,6 +296,22 @@ router.post('/:userId/holdings/:symbol/transactions', async (req, res) => {
     }
     console.error('Error creating transaction:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/portfolio/take-snapshots - Manually trigger portfolio snapshots
+router.post('/take-snapshots', async (req, res) => {
+  try {
+    console.log('📸 Manual portfolio snapshot request received...');
+    await portfolioSnapshotService.takeDailySnapshots();
+    res.json({ 
+      success: true, 
+      message: 'Portfolio snapshots taken successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error taking snapshots:', error);
+    res.status(500).json({ error: 'Failed to take snapshots' });
   }
 });
 

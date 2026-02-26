@@ -101,4 +101,20 @@ router.post('/:ticker/update-price', async (req, res) => {
   }
 });
 
+// POST /api/assets/recalculate-portfolios - Manually recalculate all portfolio values
+router.post('/recalculate-portfolios', async (req, res) => {
+  try {
+    console.log('📊 Manual portfolio recalculation request received...');
+    await stockPriceUpdater.recalculatePortfolioValues();
+    res.json({ 
+      success: true, 
+      message: 'Portfolio values recalculated successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error recalculating portfolios:', error);
+    res.status(500).json({ error: 'Failed to recalculate portfolios' });
+  }
+});
+
 export default router;

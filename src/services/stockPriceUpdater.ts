@@ -18,7 +18,7 @@ class StockPriceUpdater {
         const recentAsset = await prisma.asset.findFirst({
           where: {
             isActive: true,
-            type: 'Stock',
+            type: { in: ['Stock', 'ETF'] }, // Include ETFs for market indices
           },
           orderBy: {
             updatedAt: 'desc',
@@ -43,16 +43,17 @@ class StockPriceUpdater {
 
       console.log('📊 Starting stock price update...');
 
-      // Get all active stock assets from database
+      // Get all active stock and ETF assets from database (including SPY for S&P 500)
       const assets = await prisma.asset.findMany({
         where: {
           isActive: true,
-          type: 'Stock', // Only update stocks, not ETFs/Commodities/REITs for now
+          type: { in: ['Stock', 'ETF'] }, // Include ETFs like SPY for market indices
         },
         select: {
           id: true,
           ticker: true,
           currentPrice: true,
+          type: true,
         },
       });
 
@@ -95,7 +96,14 @@ class StockPriceUpdater {
       console.log(`✅ Stock price update complete: ${updatedCount}/${assets.length} assets updated`);
 
       // Update portfolio values based on new prices
+      console.log(`🔄 Recalculating portfolio values with new prices...`);
       await this.recalculatePortfolioValues();
+      console.log(`✅ Portfolio recalculation complete`);
+
+      // Update market indices (SPY, QQQ, DIA) for baseline comparisons
+      console.log(`📈 Updating market indices...`);
+      await this.updateMarketIndices();
+      console.log(`✅ Market indices updated`);
 
       return {
         updated: true,
@@ -148,8 +156,9 @@ class StockPriceUpdater {
 
   /**
    * Recalculate total values for all portfolios based on current asset prices
+   * Public method that can be called independently
    */
-  private async recalculatePortfolioValues(): Promise<void> {
+  async recalculatePortfolioValues(): Promise<void> {
     try {
       const portfolios = await prisma.fantasyPortfolio.findMany({
         include: {
@@ -194,12 +203,53 @@ class StockPriceUpdater {
               gainLossPercent,
             },
           });
+          
+          console.log(`    Updated slot ${slot.asset.ticker}: price=$${currentPrice.toFixed(2)}, value=$${totalValue.toFixed(2)}`);
         }
       }
 
       console.log(`✅ Recalculated ${portfolios.length} portfolio values`);
     } catch (error) {
       console.error('Error recalculating portfolio values:', error);
+    }
+  }
+
+  /**
+   * Update market indices (SPY, QQQ, DIA) for baseline comparisons
+   */
+  private async updateMarketIndices(): Promise<void> {
+    try {
+      const indices = ['SPY', 'QQQ', 'DIA'];
+      
+      for (const symbol of indices) {
+        try {
+          const quote = await finnhubService.getQuote(symbol);
+          
+          if (quote && typeof quote.currentPrice === 'number') {
+            await prisma.marketIndex.upsert({
+              where: { symbol },
+              update: {
+                currentPrice: quote.currentPrice,
+                previousClose: quote.previousClose || quote.currentPrice,
+                changePercent: quote.changePercent || 0,
+              },
+              create: {
+                symbol,
+                name: symbol === 'SPY' ? 'S&P 500' : symbol === 'QQQ' ? 'NASDAQ-100' : 'Dow Jones',
+                currentPrice: quote.currentPrice,
+                previousClose: quote.previousClose || quote.currentPrice,
+                changePercent: quote.changePercent || 0,
+              },
+            });
+          }
+        } catch (error) {
+          console.error(`Error updating market index ${symbol}:`, error);
+        }
+      }
+
+      console.log(`✅ Updated market indices (SPY, QQQ, DIA)`);
+    } catch (error) {
+      console.error('Error updating market indices:', error);
     }
   }
 }

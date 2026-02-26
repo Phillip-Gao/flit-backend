@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../services/prisma';
+import { updateUserGamificationStats, checkStreakOnLogin } from '../services/gamification';
 
 const router = express.Router();
 
@@ -76,6 +77,9 @@ router.post('/sync', async (req: Request, res: Response) => {
         data: updateData,
       });
 
+      // Check and update streak on login
+      await checkStreakOnLogin(user.id);
+
       return res.json({
         message: 'User synced successfully',
         user: {
@@ -107,6 +111,9 @@ router.post('/sync', async (req: Request, res: Response) => {
           lastLoginAt: new Date(),
         },
       });
+
+      // Check and update streak on login
+      await checkStreakOnLogin(user.id);
 
       return res.json({
         message: 'User linked to Clerk account',
@@ -624,6 +631,62 @@ router.post('/:id/complete-lesson', async (req: Request, res: Response) => {
     res.status(500).json({
       error: 'Internal server error',
       message: 'Failed to complete lesson'
+    });
+  }
+});
+
+// POST /api/users/:id/recalculate-stats - Manually recalculate Financial IQ and Daily Streak
+router.post('/:id/recalculate-stats', async (req: Request, res: Response) => {
+  try {
+    const { id: userId } = req.params;
+
+    // Check if user exists
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        username: true,
+        financialIQScore: true,
+        learningStreak: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Recalculate stats
+    const stats = await updateUserGamificationStats(userId);
+
+    // Fetch updated user
+    const updatedUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        username: true,
+        financialIQScore: true,
+        learningStreak: true,
+        lastActivityDate: true,
+      },
+    });
+
+    res.json({
+      message: 'Stats recalculated successfully',
+      previousStats: {
+        financialIQScore: user.financialIQScore,
+        learningStreak: user.learningStreak,
+      },
+      newStats: {
+        financialIQScore: stats.financialIQScore,
+        learningStreak: stats.learningStreak,
+      },
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error('Recalculate stats error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to recalculate stats',
     });
   }
 });

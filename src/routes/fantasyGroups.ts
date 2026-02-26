@@ -74,10 +74,17 @@ router.get('/', async (req, res) => {
 
     const groups = await prisma.group.findMany({
       where: {
-        OR: [
-          { adminUserId: userId as string },
-          { memberships: { some: { userId: userId as string } } },
-        ],
+        AND: [
+          {
+            OR: [
+              { adminUserId: userId as string },
+              { memberships: { some: { userId: userId as string } } },
+            ],
+          },
+          {
+            type: { not: 'tournament' } // Exclude tournaments from regular groups list
+          }
+        ]
       },
       include: {
         admin: {
@@ -207,6 +214,29 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const validated = createGroupSchema.parse(req.body);
+
+    // Get user to check learning dollars
+    const user = await prisma.user.findUnique({
+      where: { id: validated.adminUserId },
+      select: { learningDollarsEarned: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const startingBalance = validated.settings.startingBalance || 10000;
+
+    // Validate user has enough learning dollars to create group with this starting balance
+    const userLearningDollars = Number(user.learningDollarsEarned);
+    if (userLearningDollars < startingBalance) {
+      return res.status(403).json({ 
+        error: 'Insufficient learning dollars',
+        message: `You need at least $${startingBalance} in learning dollars to create a group with this starting balance. You currently have $${userLearningDollars}. Complete more lessons to earn learning dollars!`,
+        required: startingBalance,
+        available: userLearningDollars
+      });
+    }
 
     // Generate a unique join code
     let joinCode = generateJoinCode();
@@ -401,12 +431,13 @@ router.post('/join-by-code', async (req, res) => {
     const startingBalance = settings.startingBalance || 10000;
 
     // Validate user has enough learning dollars
-    if (user.learningDollarsEarned < startingBalance) {
+    const userLearningDollars = Number(user.learningDollarsEarned);
+    if (userLearningDollars < startingBalance) {
       return res.status(403).json({ 
         error: 'Insufficient learning dollars',
-        message: `You need at least $${startingBalance} in learning dollars to join this group. You currently have $${user.learningDollarsEarned}. Complete more lessons to earn learning dollars!`,
+        message: `You need at least $${startingBalance} in learning dollars to join this group. You currently have $${userLearningDollars}. Complete more lessons to earn learning dollars!`,
         required: startingBalance,
-        available: user.learningDollarsEarned
+        available: userLearningDollars
       });
     }
 
@@ -666,6 +697,272 @@ router.delete('/:id/leave', async (req, res) => {
     });
   } catch (error) {
     console.error('Error leaving group:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/fantasy-leagues/:id/end - End a group early (admin only)
+router.post('/:id/end', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const group = await prisma.group.findUnique({
+      where: { id },
+    });
+
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    // Check if user is the admin
+    if (group.adminUserId !== userId) {
+      return res.status(403).json({ error: 'Only the group admin can end the competition' });
+    }
+
+    // Update the group settings to mark it as completed
+    const settings = group.settings ? JSON.parse(group.settings) : {};
+    const now = new Date();
+    
+    // Set end date to now to mark as completed
+    settings.endDate = now.toISOString();
+    
+    await prisma.group.update({
+      where: { id },
+      data: {
+        settings: JSON.stringify(settings),
+        isActive: false,
+      },
+    });
+
+    res.json({
+      message: 'Group competition ended successfully',
+      endDate: now.toISOString(),
+    });
+  } catch (error) {
+    console.error('Error ending group:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/fantasy-leagues/tournaments/active - Get active monthly tournament
+router.get('/tournaments/active', async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    // Find or create the current month's tournament
+    const now = new Date();
+    const tournamentName = `${now.toLocaleString('default', { month: 'long' })} ${now.getFullYear()} Tournament`;
+    
+    // Look for an existing tournament for this month
+    let tournament = await prisma.group.findFirst({
+      where: {
+        type: 'tournament',
+        name: tournamentName,
+      },
+      include: {
+        admin: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        memberships: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+          orderBy: { score: 'desc' },
+        },
+        _count: {
+          select: {
+            memberships: true,
+          },
+        },
+      },
+    });
+
+    // If tournament doesn't exist, create it (using first user as admin)
+    if (!tournament && userId) {
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      
+      const settings = {
+        groupSize: 1000, // Large number for open tournament
+        startingBalance: 10000,
+        competitionPeriod: '1_month',
+        startDate: firstDayOfMonth.toISOString(),
+        endDate: lastDayOfMonth.toISOString(),
+        scoringMethod: 'Total Return %',
+        enabledAssetClasses: ['Stock', 'ETF', 'Commodity', 'REIT'],
+        minAssetPrice: 1,
+        allowShortSelling: false,
+        tradingEnabled: true,
+      };
+
+      tournament = await prisma.group.create({
+        data: {
+          name: tournamentName,
+          description: `Open monthly tournament - compete for the top spot on the leaderboard!`,
+          adminUserId: userId as string,
+          type: 'tournament',
+          maxMembers: 10000,
+          settings: JSON.stringify(settings),
+          joinCode: null, // No join code needed
+        },
+        include: {
+          admin: {
+            select: {
+              id: true,
+              username: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          memberships: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+          },
+          _count: {
+            select: {
+              memberships: true,
+            },
+          },
+        },
+      });
+    }
+
+    if (!tournament) {
+      return res.json({ tournament: null });
+    }
+
+    const settings = tournament.settings ? JSON.parse(tournament.settings) : null;
+    const formatted = {
+      ...tournament,
+      settings,
+      memberCount: tournament._count.memberships,
+      members: tournament.memberships.map((m: any) => m.user),
+      status: calculateGroupStatus(settings),
+      currentWeek: 0,
+      // Check if current user is a member
+      isUserMember: userId ? tournament.memberships.some((m: any) => m.user.id === userId) : false,
+    };
+
+    res.json({ tournament: formatted });
+  } catch (error) {
+    console.error('Error fetching tournament:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/fantasy-leagues/tournaments/:id/join - Join a tournament
+router.post('/tournaments/:id/join', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Check if tournament exists
+    const tournament = await prisma.group.findUnique({
+      where: { id, type: 'tournament' },
+      include: {
+        _count: {
+          select: { memberships: true },
+        },
+      },
+    });
+
+    if (!tournament) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+
+    // Check if tournament is full
+    if (tournament._count.memberships >= tournament.maxMembers) {
+      return res.status(400).json({ error: 'Tournament is full' });
+    }
+
+    // Get user to check learning dollars
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { learningDollarsEarned: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const settings = tournament.settings ? JSON.parse(tournament.settings) : {};
+    const startingBalance = settings.startingBalance || 10000;
+
+    // Validate user has enough learning dollars
+    const userLearningDollars = Number(user.learningDollarsEarned);
+    if (userLearningDollars < startingBalance) {
+      return res.status(403).json({ 
+        error: 'Insufficient learning dollars',
+        message: `You need at least $${startingBalance} in learning dollars to join this tournament. You currently have $${userLearningDollars}. Complete more lessons to earn learning dollars!`,
+        required: startingBalance,
+        available: userLearningDollars
+      });
+    }
+
+    // Check if user is already a member
+    const existingMembership = await prisma.groupMembership.findUnique({
+      where: {
+        userId_groupId: {
+          userId,
+          groupId: id,
+        },
+      },
+    });
+
+    if (existingMembership) {
+      return res.status(400).json({ error: 'Already joined this tournament' });
+    }
+
+    // Create membership
+    await prisma.groupMembership.create({
+      data: {
+        userId,
+        groupId: id,
+      },
+    });
+
+    // Create portfolio for the user
+    await prisma.fantasyPortfolio.create({
+      data: {
+        userId,
+        groupId: id,
+        cashBalance: startingBalance,
+        totalValue: startingBalance,
+      },
+    });
+
+    res.json({ message: 'Successfully joined tournament' });
+  } catch (error) {
+    console.error('Error joining tournament:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

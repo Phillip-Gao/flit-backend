@@ -9,8 +9,13 @@ import prisma from '../services/prisma';
 import { getCurrentUser, getCurrentUserId } from '../services/currentUser';
 import { Decimal } from '@prisma/client/runtime/library';
 import { recalculateUserPortfolios } from '../services/portfolioCalculator';
+import { portfolioSnapshotService } from '../services/portfolioSnapshotService';
+import { requireAuth } from '../middleware/auth';
 
 const router = Router();
+
+// Apply authentication to all portfolio routes
+router.use(requireAuth);
 
 // Validation schemas
 const tradeSchema = z.object({
@@ -32,7 +37,7 @@ const allocateSchema = z.object({
  */
 router.get('/', async (req, res) => {
   try {
-    const user = await getCurrentUser();
+    const user = await getCurrentUser(req);
 
     // Recalculate portfolio values to ensure they're accurate with latest stock prices
     await recalculateUserPortfolios(user.id);
@@ -62,7 +67,7 @@ router.get('/', async (req, res) => {
 router.get('/:groupId', async (req, res) => {
   try {
     const { groupId } = req.params;
-    const userId = await getCurrentUserId();
+    const userId = await getCurrentUserId(req);
 
     const portfolio = await prisma.fantasyPortfolio.findUnique({
       where: {
@@ -99,7 +104,7 @@ router.post('/trade', async (req, res) => {
   try {
     const validated = tradeSchema.parse(req.body);
     const { groupId, ticker, shares, tradeType } = validated;
-    const userId = await getCurrentUserId();
+    const userId = await getCurrentUserId(req);
 
     // Get the asset
     const asset = await prisma.asset.findUnique({
@@ -375,7 +380,7 @@ router.post('/trade', async (req, res) => {
  */
 router.post('/recalculate', async (req, res) => {
   try {
-    const userId = await getCurrentUserId();
+    const userId = await getCurrentUserId(req);
     
     console.log(`📊 Recalculating portfolios for user ${userId}...`);
     await recalculateUserPortfolios(userId);
@@ -410,7 +415,7 @@ router.post('/allocate', async (req, res) => {
   try {
     const validated = allocateSchema.parse(req.body);
     const { groupId, assetType, amount } = validated;
-    const userId = await getCurrentUserId();
+    const userId = await getCurrentUserId(req);
 
     // Get the portfolio
     const portfolio = await prisma.fantasyPortfolio.findUnique({
@@ -475,4 +480,131 @@ router.post('/allocate', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/fantasy-portfolio/:groupId/history - Get historical portfolio performance
+ * Returns daily snapshots with market baseline comparisons
+ */
+router.get('/:groupId/history', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    const { groupId } = req.params;
+    const { startDate, endDate, timeFrame } = req.query;
+
+    // Find the portfolio for this user and group
+    const portfolio = await prisma.fantasyPortfolio.findUnique({
+      where: {
+        groupId_userId: {
+          groupId,
+          userId: user.id,
+        },
+      },
+    });
+
+    if (!portfolio) {
+      return res.status(404).json({ error: 'Portfolio not found' });
+    }
+
+    // Parse date filters if provided
+    let start: Date | undefined;
+    let end: Date | undefined;
+
+    if (startDate && typeof startDate === 'string') {
+      start = new Date(startDate);
+    }
+    if (endDate && typeof endDate === 'string') {
+      end = new Date(endDate);
+    }
+
+    // Or use timeFrame to calculate date range
+    if (timeFrame && typeof timeFrame === 'string') {
+      const now = new Date();
+      const frames: Record<string, number> = {
+        '1D': 1,
+        '1W': 7,
+        '1M': 30,
+        '3M': 90,
+        '1Y': 365,
+        '5Y': 1825,
+      };
+
+      if (timeFrame === 'YTD') {
+        start = new Date(now.getFullYear(), 0, 1);
+        end = now;
+      } else if (frames[timeFrame]) {
+        start = new Date(now.getTime() - frames[timeFrame] * 24 * 60 * 60 * 1000);
+        end = now;
+      }
+    }
+
+    // Get historical snapshots
+    const history = await portfolioSnapshotService.getPortfolioHistory(
+      portfolio.id,
+      start,
+      end
+    );
+
+    // Handle edge case: if we have limited data, add current portfolio state as a data point
+    if (history.length === 0) {
+      // No snapshots yet - return current portfolio value as single data point
+      const currentValue = Number(portfolio.totalValue);
+      const currentCash = Number(portfolio.cashBalance);
+      
+      // Calculate stock value from current holdings
+      const portfolioWithSlots = await prisma.fantasyPortfolio.findUnique({
+        where: { id: portfolio.id },
+        include: { slots: { include: { asset: true } } },
+      });
+      const currentStockValue = portfolioWithSlots?.slots.reduce((sum, slot) => 
+        sum + Number(slot.shares) * Number(slot.asset.currentPrice), 0) || 0;
+      
+      const initialValue = Number(portfolio.initialValue);
+      const now = new Date();
+      
+      // Calculate what S&P 500 baseline would be
+      const daysSinceCreation = (now.getTime() - portfolio.createdAt.getTime()) / (1000 * 60 * 60 * 24);
+      const sp500Value = initialValue * Math.pow(1.10, daysSinceCreation / 365);
+      
+      history.push({
+        date: now,
+        totalValue: currentValue,
+        cashBalance: currentCash,
+        stockValue: currentStockValue,
+        dayChange: currentValue - initialValue,
+        dayChangePercent: ((currentValue - initialValue) / initialValue) * 100,
+        sp500Value,
+        nasdaqValue: initialValue * Math.pow(1.12, daysSinceCreation / 365),
+        dowValue: initialValue * Math.pow(1.08, daysSinceCreation / 365),
+      });
+    }
+
+    res.json({
+      portfolioId: portfolio.id,
+      groupId,
+      history,
+      baselines: {
+        sp500: history.map(h => ({ date: h.date, value: h.sp500Value })),
+        nasdaq: history.map(h => ({ date: h.date, value: h.nasdaqValue })),
+        dow: history.map(h => ({ date: h.date, value: h.dowValue })),
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching portfolio history:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/fantasy-portfolio/snapshots/take-now - Manually trigger daily snapshot (admin/testing)
+ */
+router.post('/snapshots/take-now', async (req, res) => {
+  try {
+    await portfolioSnapshotService.takeDailySnapshots();
+    res.json({ success: true, message: 'Daily snapshots taken successfully' });
+  } catch (error) {
+    console.error('Error taking snapshots:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
+
