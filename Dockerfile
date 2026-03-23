@@ -1,23 +1,31 @@
-# Use Node.js 18 Alpine as base image
-FROM node:18-alpine
+# Stage 1: Build (needs devDependencies for TypeScript)
+FROM node:18-alpine AS builder
 
-# Set working directory
 WORKDIR /app
-
-# Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install ALL dependencies (including devDependencies for tsc and @types/*)
+RUN npm ci
 
-# Copy source code
 COPY . .
 
-# Generate Prisma Client
-RUN npx prisma generate
+# Generate Prisma Client and compile TypeScript
+RUN npx prisma generate && npm run build
 
-# Build TypeScript
-RUN npm run build
+# Stage 2: Production (lean image)
+FROM node:18-alpine
+
+WORKDIR /app
+COPY package*.json ./
+
+# Install production dependencies only
+RUN npm ci --omit=dev
+
+# Copy compiled output and Prisma artifacts from builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
 # Expose port
 EXPOSE 3000
