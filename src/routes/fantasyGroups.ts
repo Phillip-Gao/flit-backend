@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../services/prisma';
+import { requireAuth } from '../middleware/auth';
+import { getCurrentUserId } from '../services/currentUser';
 
 // Helper function to generate a unique 6-character alphanumeric join code
 const generateJoinCode = (): string => {
@@ -45,11 +47,12 @@ import fantasyDraftRoutes from './fantasyDraft';
 
 const router = Router();
 
+router.use(requireAuth);
+
 // Validation schemas
 const createGroupSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().optional(),
-  adminUserId: z.string(),
   settings: z.object({
     groupSize: z.number().int().min(2).max(20),
     startingBalance: z.number().min(1000).max(1000000).default(10000),
@@ -66,11 +69,7 @@ const createGroupSchema = z.object({
 // GET /api/fantasy-leagues - List groups for current user
 router.get('/', async (req, res) => {
   try {
-    const { userId } = req.query;
-    
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const userId = await getCurrentUserId(req);
 
     const groups = await prisma.group.findMany({
       where: {
@@ -78,7 +77,7 @@ router.get('/', async (req, res) => {
           {
             OR: [
               { adminUserId: userId as string },
-              { memberships: { some: { userId: userId as string } } },
+              { memberships: { some: { userId: userId } } },
             ],
           },
           {
@@ -214,10 +213,11 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const validated = createGroupSchema.parse(req.body);
+    const userId = await getCurrentUserId(req);
 
     // Get user to check learning dollars
     const user = await prisma.user.findUnique({
-      where: { id: validated.adminUserId },
+      where: { id: userId },
       select: { learningDollarsEarned: true },
     });
 
@@ -250,7 +250,7 @@ router.post('/', async (req, res) => {
       data: {
         name: validated.name,
         description: validated.description,
-        adminUserId: validated.adminUserId,
+        adminUserId: userId,
         type: 'custom',
         maxMembers: validated.settings.groupSize,
         settings: JSON.stringify(validated.settings),
@@ -272,7 +272,7 @@ router.post('/', async (req, res) => {
     await prisma.groupMembership.create({
       data: {
         groupId: group.id,
-        userId: validated.adminUserId,
+        userId,
       },
     });
 
@@ -280,7 +280,7 @@ router.post('/', async (req, res) => {
     await prisma.fantasyPortfolio.create({
       data: {
         groupId: group.id,
-        userId: validated.adminUserId,
+        userId,
         cashBalance: validated.settings.startingBalance,
       },
     });
@@ -304,11 +304,7 @@ router.post('/', async (req, res) => {
 router.post('/:id/join', async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const userId = await getCurrentUserId(req);
 
     const group = await prisma.group.findUnique({
       where: { id },
@@ -392,10 +388,11 @@ router.post('/:id/join', async (req, res) => {
 // POST /api/fantasy-leagues/join-by-code - Join a group by join code
 router.post('/join-by-code', async (req, res) => {
   try {
-    const { joinCode, userId } = req.body;
+    const { joinCode } = req.body;
+    const userId = await getCurrentUserId(req);
 
-    if (!joinCode || !userId) {
-      return res.status(400).json({ error: 'joinCode and userId are required' });
+    if (!joinCode) {
+      return res.status(400).json({ error: 'joinCode is required' });
     }
 
     // Find group by join code
@@ -490,11 +487,7 @@ router.post('/join-by-code', async (req, res) => {
 router.post('/:id/start', async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const userId = await getCurrentUserId(req);
 
     const group = await prisma.group.findUnique({
       where: { id },
@@ -534,11 +527,7 @@ router.post('/:id/start', async (req, res) => {
 router.delete('/:id/leave', async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const userId = await getCurrentUserId(req);
 
     const group = await prisma.group.findUnique({
       where: { id },
@@ -705,11 +694,7 @@ router.delete('/:id/leave', async (req, res) => {
 router.post('/:id/end', async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const userId = await getCurrentUserId(req);
 
     const group = await prisma.group.findUnique({
       where: { id },
@@ -752,7 +737,7 @@ router.post('/:id/end', async (req, res) => {
 // GET /api/fantasy-leagues/tournaments/active - Get active monthly tournament
 router.get('/tournaments/active', async (req, res) => {
   try {
-    const { userId } = req.query;
+    const userId = await getCurrentUserId(req);
 
     // Find or create the current month's tournament
     const now = new Date();
@@ -865,7 +850,7 @@ router.get('/tournaments/active', async (req, res) => {
       status: calculateGroupStatus(settings),
       currentWeek: 0,
       // Check if current user is a member
-      isUserMember: userId ? tournament.memberships.some((m: any) => m.user.id === userId) : false,
+      isUserMember: tournament.memberships.some((m: any) => m.user.id === userId),
     };
 
     res.json({ tournament: formatted });
@@ -879,11 +864,7 @@ router.get('/tournaments/active', async (req, res) => {
 router.post('/tournaments/:id/join', async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const userId = await getCurrentUserId(req);
 
     // Check if tournament exists
     const tournament = await prisma.group.findUnique({

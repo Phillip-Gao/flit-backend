@@ -2,34 +2,58 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../services/prisma';
 import Decimal from 'decimal.js';
+import { Prisma } from '@prisma/client';
+import { requireAuth } from '../middleware/auth';
+import { getCurrentUserId } from '../services/currentUser';
+import { tradeIdempotency, tradeRateLimit } from '../middleware/tradeProtection';
 
 const router = Router();
 
+router.use(requireAuth);
+
+async function runSerializableTransaction<T>(work: () => Promise<T>): Promise<T> {
+  const maxRetries = 2;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      return await work();
+    } catch (error: any) {
+      const isSerializationConflict =
+        error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034';
+
+      if (!isSerializationConflict || attempt === maxRetries) {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error('Failed to complete transaction');
+}
+
 // Validation schemas
 const buyAssetSchema = z.object({
-  userId: z.string(),
   assetId: z.string(),
   shares: z.number().positive(),
 });
 
 const sellAssetSchema = z.object({
-  userId: z.string(),
   assetId: z.string(),
   shares: z.number().positive(),
 });
 
 // POST /api/fantasy-leagues/:groupId/buy - Buy an asset
-router.post('/:groupId/buy', async (req, res) => {
+router.post('/:groupId/buy', tradeRateLimit(60_000, 20), tradeIdempotency(), async (req, res) => {
   try {
     const { groupId } = req.params;
     const validated = buyAssetSchema.parse(req.body);
+    const userId = await getCurrentUserId(req);
 
     // Get user's portfolio
     const portfolio = await prisma.fantasyPortfolio.findUnique({
       where: {
         groupId_userId: {
           groupId,
-          userId: validated.userId,
+          userId,
         },
       },
     });
@@ -96,7 +120,7 @@ router.post('/:groupId/buy', async (req, res) => {
 
     // Check lesson gating
     const user = await prisma.user.findUnique({
-      where: { id: validated.userId },
+      where: { id: userId },
       select: { completedLessons: true },
     });
 
@@ -114,85 +138,113 @@ router.post('/:groupId/buy', async (req, res) => {
       }
     }
 
-    // Update or create portfolio slot
-    const existingSlot = await prisma.portfolioSlot.findUnique({
-      where: {
-        portfolioId_assetId: {
-          portfolioId: portfolio.id,
-          assetId: validated.assetId,
+    const result = await runSerializableTransaction(async () => {
+      return prisma.$transaction(
+        async (tx) => {
+          const lockedPortfolio = await tx.fantasyPortfolio.findUnique({
+            where: {
+              groupId_userId: {
+                groupId,
+                userId,
+              },
+            },
+          });
+
+          if (!lockedPortfolio) {
+            throw new Error('Portfolio not found');
+          }
+
+          const latestCashBalance = new Decimal(lockedPortfolio.cashBalance.toString());
+          if (latestCashBalance.lessThan(totalCost)) {
+            throw new Error('Insufficient funds');
+          }
+
+          const existingSlot = await tx.portfolioSlot.findUnique({
+            where: {
+              portfolioId_assetId: {
+                portfolioId: lockedPortfolio.id,
+                assetId: validated.assetId,
+              },
+            },
+          });
+
+          let newAverageCost: Decimal;
+          let newShares: Decimal;
+
+          if (existingSlot) {
+            const currentShares = new Decimal(existingSlot.shares.toString());
+            const currentAverageCost = new Decimal(existingSlot.averageCost.toString());
+            const currentTotalCost = currentShares.times(currentAverageCost);
+
+            newShares = currentShares.plus(sharesToBuy);
+            const newTotalCost = currentTotalCost.plus(totalCost);
+            newAverageCost = newTotalCost.dividedBy(newShares);
+
+            await tx.portfolioSlot.update({
+              where: { id: existingSlot.id },
+              data: {
+                shares: newShares.toNumber(),
+                averageCost: newAverageCost.toNumber(),
+                currentPrice: pricePerShare.toNumber(),
+              },
+            });
+          } else {
+            newShares = sharesToBuy;
+            newAverageCost = pricePerShare;
+
+            await tx.portfolioSlot.create({
+              data: {
+                portfolioId: lockedPortfolio.id,
+                assetId: validated.assetId,
+                shares: newShares.toNumber(),
+                averageCost: newAverageCost.toNumber(),
+                currentPrice: pricePerShare.toNumber(),
+              },
+            });
+          }
+
+          const newCashBalance = latestCashBalance.minus(totalCost);
+          await tx.fantasyPortfolio.update({
+            where: { id: lockedPortfolio.id },
+            data: {
+              cashBalance: newCashBalance.toNumber(),
+            },
+          });
+
+          const transaction = await tx.fantasyPortfolioTransaction.create({
+            data: {
+              portfolioId: lockedPortfolio.id,
+              assetId: validated.assetId,
+              type: 'buy',
+              shares: sharesToBuy.toNumber(),
+              pricePerShare: pricePerShare.toNumber(),
+              totalAmount: totalCost.toNumber(),
+              cashBefore: latestCashBalance.toNumber(),
+              cashAfter: newCashBalance.toNumber(),
+            },
+          });
+
+          return {
+            transaction,
+            newCashBalance: newCashBalance.toNumber(),
+            newShares: newShares.toNumber(),
+            averageCost: newAverageCost.toNumber(),
+          };
         },
-      },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
     });
 
-    let newAverageCost: Decimal;
-    let newShares: Decimal;
-
-    if (existingSlot) {
-      // Calculate new average cost
-      const currentShares = new Decimal(existingSlot.shares.toString());
-      const currentAverageCost = new Decimal(existingSlot.averageCost.toString());
-      const currentTotalCost = currentShares.times(currentAverageCost);
-
-      newShares = currentShares.plus(sharesToBuy);
-      const newTotalCost = currentTotalCost.plus(totalCost);
-      newAverageCost = newTotalCost.dividedBy(newShares);
-
-      await prisma.portfolioSlot.update({
-        where: { id: existingSlot.id },
-        data: {
-          shares: newShares.toNumber(),
-          averageCost: newAverageCost.toNumber(),
-          currentPrice: pricePerShare.toNumber(),
-        },
-      });
-    } else {
-      // Create new slot
-      newShares = sharesToBuy;
-      newAverageCost = pricePerShare;
-
-      await prisma.portfolioSlot.create({
-        data: {
-          portfolioId: portfolio.id,
-          assetId: validated.assetId,
-          shares: newShares.toNumber(),
-          averageCost: newAverageCost.toNumber(),
-          currentPrice: pricePerShare.toNumber(),
-        },
-      });
-    }
-
-    // Update portfolio cash balance
-    const newCashBalance = cashBalance.minus(totalCost);
-    await prisma.fantasyPortfolio.update({
-      where: { id: portfolio.id },
-      data: {
-        cashBalance: newCashBalance.toNumber(),
-      },
-    });
-
-    // Create transaction record
-    const transaction = await prisma.fantasyPortfolioTransaction.create({
-      data: {
-        portfolioId: portfolio.id,
-        assetId: validated.assetId,
-        type: 'buy',
-        shares: sharesToBuy.toNumber(),
-        pricePerShare: pricePerShare.toNumber(),
-        totalAmount: totalCost.toNumber(),
-        cashBefore: cashBalance.toNumber(),
-        cashAfter: newCashBalance.toNumber(),
-      },
-    });
-
-    res.status(201).json({
-      transaction,
-      newCashBalance: newCashBalance.toNumber(),
-      newShares: newShares.toNumber(),
-      averageCost: newAverageCost.toNumber(),
-    });
+    res.status(201).json(result);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.issues });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+      return res.status(409).json({ error: 'Trade conflict, please retry' });
+    }
+    if (error instanceof Error && error.message === 'Insufficient funds') {
+      return res.status(400).json({ error: 'Insufficient funds' });
     }
     console.error('Error buying asset:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -200,17 +252,18 @@ router.post('/:groupId/buy', async (req, res) => {
 });
 
 // POST /api/fantasy-leagues/:groupId/sell - Sell an asset
-router.post('/:groupId/sell', async (req, res) => {
+router.post('/:groupId/sell', tradeRateLimit(60_000, 20), tradeIdempotency(), async (req, res) => {
   try {
     const { groupId } = req.params;
     const validated = sellAssetSchema.parse(req.body);
+    const userId = await getCurrentUserId(req);
 
     // Get user's portfolio
     const portfolio = await prisma.fantasyPortfolio.findUnique({
       where: {
         groupId_userId: {
           groupId,
-          userId: validated.userId,
+          userId,
         },
       },
     });
@@ -268,58 +321,104 @@ router.post('/:groupId/sell', async (req, res) => {
     const pricePerShare = new Decimal(slot.asset.currentPrice.toString());
     const totalProceeds = pricePerShare.times(sharesToSell);
 
-    // Update portfolio slot
-    const newShares = currentShares.minus(sharesToSell);
+    const result = await runSerializableTransaction(async () => {
+      return prisma.$transaction(
+        async (tx) => {
+          const lockedPortfolio = await tx.fantasyPortfolio.findUnique({
+            where: {
+              groupId_userId: {
+                groupId,
+                userId,
+              },
+            },
+          });
 
-    if (newShares.isZero()) {
-      // Delete slot if no shares remain
-      await prisma.portfolioSlot.delete({
-        where: { id: slot.id },
-      });
-    } else {
-      // Update shares
-      await prisma.portfolioSlot.update({
-        where: { id: slot.id },
-        data: {
-          shares: newShares.toNumber(),
-          currentPrice: pricePerShare.toNumber(),
+          if (!lockedPortfolio) {
+            throw new Error('Portfolio not found');
+          }
+
+          const lockedSlot = await tx.portfolioSlot.findUnique({
+            where: {
+              portfolioId_assetId: {
+                portfolioId: lockedPortfolio.id,
+                assetId: validated.assetId,
+              },
+            },
+            include: {
+              asset: true,
+            },
+          });
+
+          if (!lockedSlot) {
+            throw new Error('Asset not found in portfolio');
+          }
+
+          const currentShares = new Decimal(lockedSlot.shares.toString());
+          if (currentShares.lessThan(sharesToSell)) {
+            throw new Error('Insufficient shares');
+          }
+
+          const pricePerShare = new Decimal(lockedSlot.asset.currentPrice.toString());
+          const totalProceeds = pricePerShare.times(sharesToSell);
+          const newShares = currentShares.minus(sharesToSell);
+
+          if (newShares.isZero()) {
+            await tx.portfolioSlot.delete({
+              where: { id: lockedSlot.id },
+            });
+          } else {
+            await tx.portfolioSlot.update({
+              where: { id: lockedSlot.id },
+              data: {
+                shares: newShares.toNumber(),
+                currentPrice: pricePerShare.toNumber(),
+              },
+            });
+          }
+
+          const cashBalance = new Decimal(lockedPortfolio.cashBalance.toString());
+          const newCashBalance = cashBalance.plus(totalProceeds);
+
+          await tx.fantasyPortfolio.update({
+            where: { id: lockedPortfolio.id },
+            data: {
+              cashBalance: newCashBalance.toNumber(),
+            },
+          });
+
+          const transaction = await tx.fantasyPortfolioTransaction.create({
+            data: {
+              portfolioId: lockedPortfolio.id,
+              assetId: validated.assetId,
+              type: 'sell',
+              shares: sharesToSell.toNumber(),
+              pricePerShare: pricePerShare.toNumber(),
+              totalAmount: totalProceeds.toNumber(),
+              cashBefore: cashBalance.toNumber(),
+              cashAfter: newCashBalance.toNumber(),
+            },
+          });
+
+          return {
+            transaction,
+            newCashBalance: newCashBalance.toNumber(),
+            remainingShares: newShares.toNumber(),
+          };
         },
-      });
-    }
-
-    // Update portfolio cash balance
-    const cashBalance = new Decimal(portfolio.cashBalance.toString());
-    const newCashBalance = cashBalance.plus(totalProceeds);
-
-    await prisma.fantasyPortfolio.update({
-      where: { id: portfolio.id },
-      data: {
-        cashBalance: newCashBalance.toNumber(),
-      },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
     });
 
-    // Create transaction record
-    const transaction = await prisma.fantasyPortfolioTransaction.create({
-      data: {
-        portfolioId: portfolio.id,
-        assetId: validated.assetId,
-        type: 'sell',
-        shares: sharesToSell.toNumber(),
-        pricePerShare: pricePerShare.toNumber(),
-        totalAmount: totalProceeds.toNumber(),
-        cashBefore: cashBalance.toNumber(),
-        cashAfter: newCashBalance.toNumber(),
-      },
-    });
-
-    res.status(201).json({
-      transaction,
-      newCashBalance: newCashBalance.toNumber(),
-      remainingShares: newShares.toNumber(),
-    });
+    res.status(201).json(result);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.issues });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+      return res.status(409).json({ error: 'Trade conflict, please retry' });
+    }
+    if (error instanceof Error && error.message === 'Insufficient shares') {
+      return res.status(400).json({ error: 'Insufficient shares' });
     }
     console.error('Error selling asset:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -330,6 +429,22 @@ router.post('/:groupId/sell', async (req, res) => {
 router.get('/:groupId/portfolio/:userId', async (req, res) => {
   try {
     const { groupId, userId } = req.params;
+    const requesterUserId = await getCurrentUserId(req);
+
+    if (requesterUserId !== userId) {
+      const requesterMembership = await prisma.groupMembership.findUnique({
+        where: {
+          userId_groupId: {
+            userId: requesterUserId,
+            groupId,
+          },
+        },
+      });
+
+      if (!requesterMembership) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
 
     const portfolio = await prisma.fantasyPortfolio.findUnique({
       where: {

@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../services/prisma';
+import { requireAuth } from '../middleware/auth';
+import { getCurrentUserId } from '../services/currentUser';
 
 const router = Router();
+
+router.use(requireAuth);
 
 // Validation schemas
 const updateLineupSchema = z.object({
@@ -21,7 +25,6 @@ const createTradeSchema = z.object({
 */
 
 const createWaiverClaimSchema = z.object({
-  userId: z.string(),
   assetId: z.string(),
   dropAssetId: z.string().optional(),
 });
@@ -32,17 +35,13 @@ const createWaiverClaimSchema = z.object({
 router.get('/:groupId/portfolio', async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { userId } = req.query;
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const userId = await getCurrentUserId(req);
 
     const portfolio = await prisma.fantasyPortfolio.findUnique({
       where: {
         groupId_userId: {
           groupId,
-          userId: userId as string,
+          userId,
         },
       },
       include: {
@@ -178,17 +177,13 @@ router.put('/portfolios/:id/lineup', async (req, res) => {
 router.get('/:groupId/matchup/current', async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { userId } = req.query;
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const userId = await getCurrentUserId(req);
 
     // Find the most recent active or pending matchup for this user
     const matchup = await prisma.matchup.findFirst({
       where: {
         groupId,
-        OR: [{ user1Id: userId as string }, { user2Id: userId as string }],
+        OR: [{ user1Id: userId }, { user2Id: userId }],
         status: { in: ['pending', 'active'] },
       },
       orderBy: { week: 'desc' },
@@ -209,17 +204,13 @@ router.get('/:groupId/matchup/current', async (req, res) => {
 router.get('/:groupId/matchup/week/:week', async (req, res) => {
   try {
     const { groupId, week } = req.params;
-    const { userId } = req.query;
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const userId = await getCurrentUserId(req);
 
     const matchup = await prisma.matchup.findFirst({
       where: {
         groupId,
         week: parseInt(week),
-        OR: [{ user1Id: userId as string }, { user2Id: userId as string }],
+        OR: [{ user1Id: userId }, { user2Id: userId }],
       },
     });
 
@@ -394,6 +385,7 @@ router.post('/:groupId/waivers', async (req, res) => {
   try {
     const { groupId } = req.params;
     const validated = createWaiverClaimSchema.parse(req.body);
+    const userId = await getCurrentUserId(req);
 
     // Get current waiver priority
     const existingClaims = await prisma.waiverClaim.findMany({
@@ -411,7 +403,7 @@ router.post('/:groupId/waivers', async (req, res) => {
     const claim = await prisma.waiverClaim.create({
       data: {
         groupId,
-        userId: validated.userId,
+        userId,
         assetId: validated.assetId,
         dropAssetId: validated.dropAssetId,
         priority: maxPriority + 1,
@@ -528,14 +520,10 @@ router.get('/:groupId/market/assets', async (req, res) => {
 // GET /api/fantasy-notifications - Get user notifications
 router.get('/notifications', async (req, res) => {
   try {
-    const { userId } = req.query;
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const userId = await getCurrentUserId(req);
 
     const notifications = await prisma.notification.findMany({
-      where: { userId: userId as string },
+      where: { userId },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
@@ -551,13 +539,18 @@ router.get('/notifications', async (req, res) => {
 router.post('/notifications/:id/read', async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = await getCurrentUserId(req);
 
-    const updated = await prisma.notification.update({
-      where: { id },
+    const updated = await prisma.notification.updateMany({
+      where: { id, userId },
       data: { isRead: true },
     });
 
-    res.json(updated);
+    if (updated.count === 0) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+
+    res.json({ success: true });
   } catch (error) {
     console.error('Error marking notification as read:', error);
     res.status(500).json({ error: 'Internal server error' });
