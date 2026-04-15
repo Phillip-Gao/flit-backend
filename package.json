@@ -16,6 +16,7 @@
     "db:seed": "ts-node scripts/seed.ts",
     "test:api": "node scripts/test-api.js",
     "test:db": "node scripts/test-db.js",
+    "test:trade-concurrency": "node scripts/test-trade-concurrency.js",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -34,6 +35,7 @@
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^4.2.1",
+    "redis": "^5.8.3",
     "zod": "^4.1.12"
   },
   "devDependencies": {

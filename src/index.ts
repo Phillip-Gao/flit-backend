@@ -6,12 +6,19 @@ import cron from 'node-cron';
 import prisma from './services/prisma';
 import { stockPriceUpdater } from './services/stockPriceUpdater';
 import { portfolioSnapshotService } from './services/portfolioSnapshotService';
+import { configureTradeProtectionStorage } from './middleware/tradeProtection';
+import {
+  RedisLikeClient,
+  RedisTradeIdempotencyStorage,
+  RedisTradeRateLimitStorage,
+} from './services/tradeProtectionStorage';
 
 // Load environment variables
 dotenv.config();
 
 const app: Application = express();
 const PORT = process.env.PORT || 3000;
+let redisClient: { quit: () => Promise<unknown> } | null = null;
 
 // Middleware
 app.use(cors({
@@ -58,23 +65,77 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('Shutting down gracefully...');
+  if (redisClient) {
+    await redisClient.quit();
+  }
   await prisma.$disconnect();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   console.log('Shutting down gracefully...');
+  if (redisClient) {
+    await redisClient.quit();
+  }
   await prisma.$disconnect();
   process.exit(0);
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  
-  // Initialize scheduled tasks
-  initializeScheduledTasks();
-});
+void bootstrap();
+
+async function bootstrap() {
+  await initializeTradeProtectionStorage();
+
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+
+    // Initialize scheduled tasks
+    initializeScheduledTasks();
+  });
+}
+
+async function initializeTradeProtectionStorage() {
+  const redisUrl = process.env.REDIS_URL?.trim();
+
+  if (!redisUrl) {
+    console.log('🧠 Trade protection storage: using in-memory mode (REDIS_URL not set)');
+    return;
+  }
+
+  try {
+    const { createClient } = await import('redis');
+    const client = createClient({ url: redisUrl });
+
+    client.on('error', (error) => {
+      console.error('Redis client error:', error);
+    });
+
+    await client.connect();
+    redisClient = client;
+
+    const redisLikeClient: RedisLikeClient = {
+      get: (key) => client.get(key),
+      set: async (key, value, ttlMs) => {
+        await client.set(key, value, { PX: ttlMs });
+      },
+      incr: (key) => client.incr(key),
+      pttl: (key) => client.pTTL(key),
+      pexpire: async (key, ttlMs) => {
+        await client.pExpire(key, ttlMs);
+      },
+    };
+
+    configureTradeProtectionStorage({
+      rateLimitStorage: new RedisTradeRateLimitStorage(redisLikeClient),
+      idempotencyStorage: new RedisTradeIdempotencyStorage(redisLikeClient),
+    });
+
+    console.log('✅ Trade protection storage: Redis enabled');
+  } catch (error) {
+    console.error('⚠️ Failed to initialize Redis trade protection storage, falling back to in-memory:', error);
+  }
+}
 
 /**
  * Initialize scheduled tasks for stock price updates
