@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import prisma from '../services/prisma';
 import { requireAuth } from '../middleware/auth';
 import { getCurrentUserId } from '../services/currentUser';
+import prisma from '../services/prisma';
 
 // Helper function to generate a unique 6-character alphanumeric join code
 const generateJoinCode = (): string => {
@@ -66,17 +66,22 @@ const createGroupSchema = z.object({
   }),
 });
 
-// GET /api/fantasy-leagues - List groups for current user
-router.get('/', async (req, res) => {
+// GET /api/fantasy-groups - List groups for current user
+router.get('/', requireAuth, async (req, res) => {
   try {
-    const userId = await getCurrentUserId(req);
+    const userIdParam = req.query.userId;
+    const userId = typeof userIdParam === 'string' ? userIdParam : undefined;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
 
     const groups = await prisma.group.findMany({
       where: {
         AND: [
           {
             OR: [
-              { adminUserId: userId as string },
+              { adminUserId: userId },
               { memberships: { some: { userId: userId } } },
             ],
           },
