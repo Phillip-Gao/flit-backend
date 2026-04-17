@@ -9,7 +9,7 @@ import prisma from '../services/prisma';
 import { getCurrentUser, getCurrentUserId } from '../services/currentUser';
 import { Decimal } from '@prisma/client/runtime/library';
 import { Prisma } from '@prisma/client';
-import { recalculateUserPortfolios } from '../services/portfolioCalculator';
+import { recalculateUserPortfolios, updatePortfolioTotalValue } from '../services/portfolioCalculator';
 import { portfolioSnapshotService } from '../services/portfolioSnapshotService';
 import { requireAuth } from '../middleware/auth';
 import { tradeIdempotency, tradeRateLimit } from '../middleware/tradeProtection';
@@ -52,6 +52,8 @@ const allocateSchema = z.object({
   amount: z.number(),
 });
 
+const BONDS_LOCK_DAYS = 30;
+
 /**
  * GET /api/fantasy-portfolio - Get current user's portfolios
  * Automatically recalculates portfolio values to ensure they're up-to-date
@@ -90,6 +92,22 @@ router.get('/:groupId', async (req, res) => {
     const { groupId } = req.params;
     const userId = await getCurrentUserId(req);
 
+    const portfolioRef = await prisma.fantasyPortfolio.findUnique({
+      where: {
+        groupId_userId: {
+          groupId,
+          userId,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!portfolioRef) {
+      return res.status(404).json({ error: 'Portfolio not found' });
+    }
+
+    await updatePortfolioTotalValue(portfolioRef.id);
+
     const portfolio = await prisma.fantasyPortfolio.findUnique({
       where: {
         groupId_userId: {
@@ -106,10 +124,6 @@ router.get('/:groupId', async (req, res) => {
         },
       },
     });
-
-    if (!portfolio) {
-      return res.status(404).json({ error: 'Portfolio not found' });
-    }
 
     res.json(portfolio);
   } catch (error) {
@@ -441,6 +455,16 @@ router.post('/allocate', async (req, res) => {
 
     const cashBalance = Number(portfolio.cashBalance);
     const currentAllocation = Number(portfolio[fieldName] || 0);
+    const now = new Date();
+    const existingBondLock = portfolio.bondsLockedUntil ? new Date(portfolio.bondsLockedUntil) : null;
+
+    if (assetType === 'bonds' && amount < 0 && existingBondLock && existingBondLock > now) {
+      return res.status(400).json({
+        error: 'Bonds are locked',
+        message: `Bonds are locked until ${existingBondLock.toLocaleDateString()}.`,
+        lockedUntil: existingBondLock.toISOString(),
+      });
+    }
 
     // If amount is positive, we're buying (moving from cash)
     // If amount is negative, we're selling (moving to cash)
@@ -455,19 +479,34 @@ router.post('/allocate', async (req, res) => {
     const newCashBalance = cashBalance - amount;
     const newAllocation = currentAllocation + amount;
 
-    await prisma.fantasyPortfolio.update({
+    const updateData: any = {
+      cashBalance: new Decimal(newCashBalance),
+      [fieldName]: new Decimal(newAllocation),
+    };
+
+    if (assetType === 'bonds') {
+      if (amount > 0) {
+        const newLock = new Date(now.getTime() + BONDS_LOCK_DAYS * 24 * 60 * 60 * 1000);
+        updateData.bondsLockedUntil =
+          existingBondLock && existingBondLock > newLock ? existingBondLock : newLock;
+      } else if (newAllocation <= 0) {
+        updateData.bondsLockedUntil = null;
+      }
+    }
+
+    const updatedPortfolio = await prisma.fantasyPortfolio.update({
       where: { id: portfolio.id },
-      data: {
-        cashBalance: new Decimal(newCashBalance),
-        [fieldName]: new Decimal(newAllocation),
-      },
+      data: updateData,
     });
+
+    await updatePortfolioTotalValue(portfolio.id);
 
     res.json({
       success: true,
       portfolio: {
         cashBalance: newCashBalance,
         [assetType]: newAllocation,
+        bondsLockedUntil: updatedPortfolio.bondsLockedUntil,
       },
     });
   } catch (error) {
@@ -545,7 +584,6 @@ router.get('/:groupId/history', async (req, res) => {
     // Handle edge case: if we have limited data, add current portfolio state as a data point
     if (history.length === 0) {
       // No snapshots yet - return current portfolio value as single data point
-      const currentValue = Number(portfolio.totalValue);
       const currentCash = Number(portfolio.cashBalance);
       
       // Calculate stock value from current holdings
@@ -555,8 +593,11 @@ router.get('/:groupId/history', async (req, res) => {
       });
       const currentStockValue = portfolioWithSlots?.slots.reduce((sum, slot) => 
         sum + Number(slot.shares) * Number(slot.asset.currentPrice), 0) || 0;
+      const computedCurrentValue = currentCash + currentStockValue;
+      const persistedTotalValue = Number(portfolio.totalValue);
+      const currentValue = persistedTotalValue > 0 ? persistedTotalValue : computedCurrentValue;
       
-      const initialValue = Number(portfolio.initialValue);
+      const initialValue = Number(portfolio.initialValue) > 0 ? Number(portfolio.initialValue) : currentValue;
       const now = new Date();
       
       // Calculate what S&P 500 baseline would be
@@ -569,7 +610,7 @@ router.get('/:groupId/history', async (req, res) => {
         cashBalance: currentCash,
         stockValue: currentStockValue,
         dayChange: currentValue - initialValue,
-        dayChangePercent: ((currentValue - initialValue) / initialValue) * 100,
+        dayChangePercent: initialValue > 0 ? ((currentValue - initialValue) / initialValue) * 100 : 0,
         sp500Value,
         nasdaqValue: initialValue * Math.pow(1.12, daysSinceCreation / 365),
         dowValue: initialValue * Math.pow(1.08, daysSinceCreation / 365),
