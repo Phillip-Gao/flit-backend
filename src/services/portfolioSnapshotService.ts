@@ -154,33 +154,34 @@ export class PortfolioSnapshotService {
       };
     }
 
-    // Find the earliest snapshot across ALL portfolios in this group
-    // This timestamp establishes the baseline for S&P 500 tracking
-    const earliestSnapshot = await prisma.fantasyPortfolioSnapshot.findFirst({
-      where: {
-        portfolio: {
-          groupId: groupId,
-        },
-      },
-      orderBy: { date: 'asc' },
-      select: { date: true, sp500Value: true },
+    // Keep one fixed SPY baseline per group so hourly snapshots can produce
+    // consistent percentage moves over time.
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      select: { settings: true },
     });
+    const settings = group?.settings ? JSON.parse(group.settings) : {};
+    let baselineSpyPrice = Number(settings.baselineSpyPrice);
 
-    let baselineSpyPrice: number;
-
-    if (earliestSnapshot && earliestSnapshot.sp500Value) {
-      // Calculate baseline SPY price from the earliest snapshot
-      // All portfolios in this group will use this same baseline
-      // sp500Value = (initialValue / baselineSpyPrice) * currentSpyPrice
-      // So: baselineSpyPrice = (initialValue * currentSpyPrice) / sp500Value
-      const currentSpyPrice = Number(spy.currentPrice);
-      const earliestSp500Value = Number(earliestSnapshot.sp500Value);
-      baselineSpyPrice = (initialValue * currentSpyPrice) / earliestSp500Value;
-    } else {
-      // No snapshots exist yet - establish baseline using SPY's current previousClose
-      // This represents the SPY price at market close before tracking started
+    if (!Number.isFinite(baselineSpyPrice) || baselineSpyPrice <= 0) {
       baselineSpyPrice = Number(spy.previousClose);
-      console.log(`  📍 Establishing baseline SPY price from previousClose: $${baselineSpyPrice.toFixed(2)}`);
+      if (!Number.isFinite(baselineSpyPrice) || baselineSpyPrice <= 0) {
+        baselineSpyPrice = Number(spy.currentPrice);
+      }
+      if (!Number.isFinite(baselineSpyPrice) || baselineSpyPrice <= 0) {
+        baselineSpyPrice = 1;
+      }
+
+      const nextSettings = {
+        ...settings,
+        baselineSpyPrice,
+        baselineSetAt: new Date().toISOString(),
+      };
+      await prisma.group.update({
+        where: { id: groupId },
+        data: { settings: JSON.stringify(nextSettings) },
+      });
+      console.log(`  📍 Established group SPY baseline: $${baselineSpyPrice.toFixed(2)}`);
     }
     
     // Calculate how many SPY shares could be bought with initial value at baseline price
