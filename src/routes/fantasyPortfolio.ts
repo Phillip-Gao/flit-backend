@@ -632,16 +632,45 @@ router.get('/:groupId/history', async (req, res) => {
       sum + Number(slot.shares) * Number(slot.asset.currentPrice), 0) || 0;
     const currentValue = refreshedTotalValue > 0 ? refreshedTotalValue : currentCash + currentStockValue;
 
-    // Handle edge case: if we have limited data, add current portfolio state as a data point
+    const spy = await prisma.asset.findUnique({
+      where: { ticker: 'SPY' },
+      select: { currentPrice: true, previousClose: true },
+    });
+    const spyCurrent = Number(spy?.currentPrice ?? 0);
+    const spyPreviousClose = Number(spy?.previousClose ?? 0);
+    const safeSpyGrowth =
+      spyCurrent > 0 && spyPreviousClose > 0
+        ? spyCurrent / spyPreviousClose
+        : 1;
+
+    // Handle edge case: if we have limited data, add current portfolio state as data points.
     if (history.length === 0) {
-      // No snapshots yet - return current portfolio value as single data point
+      // No snapshots yet. If enough time has passed, synthesize a baseline + now pair
+      // so the chart can show a meaningful change.
       const initialValue = Number(portfolio.initialValue) > 0 ? Number(portfolio.initialValue) : currentValue;
       const now = new Date();
-      
-      // Calculate what S&P 500 baseline would be
-      const daysSinceCreation = (now.getTime() - portfolio.createdAt.getTime()) / (1000 * 60 * 60 * 24);
-      const sp500Value = initialValue * Math.pow(1.10, daysSinceCreation / 365);
-      
+      const createdAt = new Date(portfolio.createdAt);
+      const elapsedMs = now.getTime() - createdAt.getTime();
+      const hasBeenAtLeastOneHour = elapsedMs >= 60 * 60 * 1000;
+
+      if (hasBeenAtLeastOneHour) {
+        history.push({
+          date: createdAt,
+          totalValue: initialValue,
+          cashBalance: initialValue,
+          stockValue: 0,
+          dayChange: 0,
+          dayChangePercent: 0,
+          sp500Value: initialValue,
+          nasdaqValue: initialValue,
+          dowValue: initialValue,
+        });
+      }
+
+      const sp500Now = initialValue * safeSpyGrowth;
+      const nasdaqNow = initialValue * Math.pow(safeSpyGrowth, 1.2);
+      const dowNow = initialValue * Math.pow(safeSpyGrowth, 0.8);
+
       history.push({
         date: now,
         totalValue: currentValue,
@@ -649,9 +678,9 @@ router.get('/:groupId/history', async (req, res) => {
         stockValue: currentStockValue,
         dayChange: currentValue - initialValue,
         dayChangePercent: initialValue > 0 ? ((currentValue - initialValue) / initialValue) * 100 : 0,
-        sp500Value,
-        nasdaqValue: initialValue * Math.pow(1.12, daysSinceCreation / 365),
-        dowValue: initialValue * Math.pow(1.08, daysSinceCreation / 365),
+        sp500Value: sp500Now,
+        nasdaqValue: nasdaqNow,
+        dowValue: dowNow,
       });
     } else {
       const latest = history[history.length - 1];
@@ -664,6 +693,9 @@ router.get('/:groupId/history', async (req, res) => {
 
       if (shouldAppendCurrentPoint && (!end || now <= end.getTime())) {
         const previousValue = Number.isFinite(latestValue) ? latestValue : currentValue;
+        const latestSp500 = Number(latest.sp500Value) || Number(portfolio.initialValue) || currentValue;
+        const latestNasdaq = Number(latest.nasdaqValue) || Number(portfolio.initialValue) || currentValue;
+        const latestDow = Number(latest.dowValue) || Number(portfolio.initialValue) || currentValue;
         history.push({
           date: new Date(now),
           totalValue: currentValue,
@@ -671,9 +703,10 @@ router.get('/:groupId/history', async (req, res) => {
           stockValue: currentStockValue,
           dayChange: currentValue - previousValue,
           dayChangePercent: previousValue > 0 ? ((currentValue - previousValue) / previousValue) * 100 : 0,
-          sp500Value: Number(latest.sp500Value) || Number(portfolio.initialValue) || currentValue,
-          nasdaqValue: Number(latest.nasdaqValue) || Number(portfolio.initialValue) || currentValue,
-          dowValue: Number(latest.dowValue) || Number(portfolio.initialValue) || currentValue,
+          // Keep baselines moving between snapshots using live SPY move instead of freezing at previous value.
+          sp500Value: latestSp500 * safeSpyGrowth,
+          nasdaqValue: latestNasdaq * Math.pow(safeSpyGrowth, 1.2),
+          dowValue: latestDow * Math.pow(safeSpyGrowth, 0.8),
         });
       }
     }
