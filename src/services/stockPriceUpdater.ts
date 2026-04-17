@@ -5,6 +5,7 @@
 
 import prisma from './prisma';
 import { finnhubService } from './finnhub';
+import { recalculateAllPortfolios } from './portfolioCalculator';
 
 class StockPriceUpdater {
   /**
@@ -160,55 +161,9 @@ class StockPriceUpdater {
    */
   async recalculatePortfolioValues(): Promise<void> {
     try {
-      const portfolios = await prisma.fantasyPortfolio.findMany({
-        include: {
-          slots: {
-            include: {
-              asset: true,
-            },
-          },
-        },
-      });
-
-      for (const portfolio of portfolios) {
-        // Calculate total stock value
-        const totalStockValue = portfolio.slots.reduce((sum, slot) => {
-          return sum + (Number(slot.shares) * Number(slot.asset.currentPrice));
-        }, 0);
-
-        // Update portfolio total value
-        const newTotalValue = Number(portfolio.cashBalance) + totalStockValue;
-
-        await prisma.fantasyPortfolio.update({
-          where: { id: portfolio.id },
-          data: {
-            totalValue: newTotalValue,
-          },
-        });
-
-        // Update each slot's current price and calculated fields
-        for (const slot of portfolio.slots) {
-          const currentPrice = Number(slot.asset.currentPrice);
-          const totalValue = Number(slot.shares) * currentPrice;
-          const averageCost = Number(slot.averageCost);
-          const gainLoss = (currentPrice - averageCost) * Number(slot.shares);
-          const gainLossPercent = averageCost > 0 ? ((currentPrice - averageCost) / averageCost) * 100 : 0;
-
-          await prisma.portfolioSlot.update({
-            where: { id: slot.id },
-            data: {
-              currentPrice,
-              totalValue,
-              gainLoss,
-              gainLossPercent,
-            },
-          });
-          
-          console.log(`    Updated slot ${slot.asset.ticker}: price=$${currentPrice.toFixed(2)}, value=$${totalValue.toFixed(2)}`);
-        }
-      }
-
-      console.log(`✅ Recalculated ${portfolios.length} portfolio values`);
+      await recalculateAllPortfolios();
+      const count = await prisma.fantasyPortfolio.count();
+      console.log(`✅ Recalculated ${count} portfolio values`);
     } catch (error) {
       console.error('Error recalculating portfolio values:', error);
     }

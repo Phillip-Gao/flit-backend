@@ -53,6 +53,7 @@ router.use(requireAuth);
 const createGroupSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().optional(),
+  learningDollars: z.number().min(0).optional(),
   settings: z.object({
     groupSize: z.number().int().min(2).max(20),
     startingBalance: z.number().min(1000).max(1000000).default(10000),
@@ -233,13 +234,17 @@ router.post('/', async (req, res) => {
     const startingBalance = validated.settings.startingBalance || 10000;
 
     // Validate user has enough learning dollars to create group with this starting balance
-    const userLearningDollars = Number(user.learningDollarsEarned);
-    if (userLearningDollars < startingBalance) {
+    const serverLearningDollars = Number(user.learningDollarsEarned);
+    const clientLearningDollars = Number(req.body?.learningDollars);
+    const effectiveLearningDollars = Number.isFinite(clientLearningDollars)
+      ? Math.min(serverLearningDollars, clientLearningDollars)
+      : serverLearningDollars;
+    if (effectiveLearningDollars < startingBalance) {
       return res.status(403).json({ 
         error: 'Insufficient learning dollars',
-        message: `You need at least $${startingBalance} in learning dollars to create a group with this starting balance. You currently have $${userLearningDollars}. Complete more lessons to earn learning dollars!`,
+        message: `You need at least $${startingBalance} in learning dollars to create a group with this starting balance. You currently have $${effectiveLearningDollars}. Complete more lessons to earn learning dollars!`,
         required: startingBalance,
-        available: userLearningDollars
+        available: effectiveLearningDollars
       });
     }
 
@@ -286,7 +291,9 @@ router.post('/', async (req, res) => {
       data: {
         groupId: group.id,
         userId,
-        cashBalance: validated.settings.startingBalance,
+        cashBalance: startingBalance,
+        totalValue: startingBalance,
+        initialValue: startingBalance,
       },
     });
 
@@ -342,13 +349,19 @@ router.post('/:id/join', async (req, res) => {
     const settings = group.settings ? JSON.parse(group.settings) : {};
     const startingBalance = settings.startingBalance || 10000;
 
+    const serverLearningDollars = Number(user.learningDollarsEarned);
+    const clientLearningDollars = Number(req.body?.learningDollars);
+    const effectiveLearningDollars = Number.isFinite(clientLearningDollars)
+      ? Math.min(serverLearningDollars, clientLearningDollars)
+      : serverLearningDollars;
+
     // Validate user has enough learning dollars
-    if (user.learningDollarsEarned < startingBalance) {
+    if (effectiveLearningDollars < startingBalance) {
       return res.status(403).json({ 
         error: 'Insufficient learning dollars',
-        message: `You need at least $${startingBalance} in learning dollars to join this group. You currently have $${user.learningDollarsEarned}.`,
+        message: `You need at least $${startingBalance} in learning dollars to join this group. You currently have $${effectiveLearningDollars}.`,
         required: startingBalance,
-        available: user.learningDollarsEarned
+        available: effectiveLearningDollars
       });
     }
 
@@ -380,6 +393,8 @@ router.post('/:id/join', async (req, res) => {
         groupId: id,
         userId,
         cashBalance: startingBalance,
+        totalValue: startingBalance,
+        initialValue: startingBalance,
       },
     });
 
@@ -433,13 +448,17 @@ router.post('/join-by-code', async (req, res) => {
     const startingBalance = settings.startingBalance || 10000;
 
     // Validate user has enough learning dollars
-    const userLearningDollars = Number(user.learningDollarsEarned);
-    if (userLearningDollars < startingBalance) {
+    const serverLearningDollars = Number(user.learningDollarsEarned);
+    const clientLearningDollars = Number(req.body?.learningDollars);
+    const effectiveLearningDollars = Number.isFinite(clientLearningDollars)
+      ? Math.min(serverLearningDollars, clientLearningDollars)
+      : serverLearningDollars;
+    if (effectiveLearningDollars < startingBalance) {
       return res.status(403).json({ 
         error: 'Insufficient learning dollars',
-        message: `You need at least $${startingBalance} in learning dollars to join this group. You currently have $${userLearningDollars}. Complete more lessons to earn learning dollars!`,
+        message: `You need at least $${startingBalance} in learning dollars to join this group. You currently have $${effectiveLearningDollars}. Complete more lessons to earn learning dollars!`,
         required: startingBalance,
-        available: userLearningDollars
+        available: effectiveLearningDollars
       });
     }
 
@@ -471,6 +490,8 @@ router.post('/join-by-code', async (req, res) => {
         groupId: group.id,
         userId,
         cashBalance: startingBalance,
+        totalValue: startingBalance,
+        initialValue: startingBalance,
       },
     });
 
@@ -500,6 +521,10 @@ router.post('/:id/start', async (req, res) => {
 
     if (!group) {
       return res.status(404).json({ error: 'Group not found' });
+    }
+
+    if (group.type === 'tournament') {
+      return res.status(403).json({ error: 'Monthly tournaments cannot be ended manually' });
     }
 
     // Check if user is the admin
@@ -904,13 +929,17 @@ router.post('/tournaments/:id/join', async (req, res) => {
     const startingBalance = settings.startingBalance || 10000;
 
     // Validate user has enough learning dollars
-    const userLearningDollars = Number(user.learningDollarsEarned);
-    if (userLearningDollars < startingBalance) {
+    const serverLearningDollars = Number(user.learningDollarsEarned);
+    const clientLearningDollars = Number(req.body?.learningDollars);
+    const effectiveLearningDollars = Number.isFinite(clientLearningDollars)
+      ? Math.min(serverLearningDollars, clientLearningDollars)
+      : serverLearningDollars;
+    if (effectiveLearningDollars < startingBalance) {
       return res.status(403).json({ 
         error: 'Insufficient learning dollars',
-        message: `You need at least $${startingBalance} in learning dollars to join this tournament. You currently have $${userLearningDollars}. Complete more lessons to earn learning dollars!`,
+        message: `You need at least $${startingBalance} in learning dollars to join this tournament. You currently have $${effectiveLearningDollars}. Complete more lessons to earn learning dollars!`,
         required: startingBalance,
-        available: userLearningDollars
+        available: effectiveLearningDollars
       });
     }
 
@@ -943,6 +972,7 @@ router.post('/tournaments/:id/join', async (req, res) => {
         groupId: id,
         cashBalance: startingBalance,
         totalValue: startingBalance,
+        initialValue: startingBalance,
       },
     });
 

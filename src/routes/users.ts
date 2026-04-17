@@ -52,6 +52,11 @@ const syncUserSchema = z.object({
     .transform((val) => (val ? new Date(val + 'T00:00:00.000Z') : undefined)),
 });
 
+const checkUsernameSchema = z.object({
+  username: z.string().min(3, 'Username must be at least 3 characters').max(20, 'Username must be less than 20 characters'),
+  excludeUserId: z.string().optional(),
+});
+
 // POST /users/sync - Create or update user from Clerk authentication
 router.post('/sync', async (req: Request, res: Response) => {
   try {
@@ -186,6 +191,42 @@ router.post('/sync', async (req: Request, res: Response) => {
     res.status(500).json({
       error: 'Internal server error',
       message: 'Failed to sync user',
+    });
+  }
+});
+
+// GET /users/check-username - Check whether a username is available
+router.get('/check-username', async (req: Request, res: Response) => {
+  try {
+    const validatedData = checkUsernameSchema.parse(req.query);
+
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        username: {
+          equals: validatedData.username,
+          mode: 'insensitive',
+        },
+        ...(validatedData.excludeUserId ? { NOT: { id: validatedData.excludeUserId } } : {}),
+      },
+      select: { id: true },
+    });
+
+    res.json({
+      available: !existingUser,
+      message: existingUser ? 'Username is already taken' : 'Username is available',
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: error.issues,
+      });
+    }
+
+    console.error('Check username error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to check username availability',
     });
   }
 });
