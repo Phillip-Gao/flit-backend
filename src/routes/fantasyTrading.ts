@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client';
 import { requireAuth } from '../middleware/auth';
 import { getCurrentUserId } from '../services/currentUser';
 import { tradeIdempotency, tradeRateLimit } from '../middleware/tradeProtection';
+import { updatePortfolioTotalValue } from '../services/portfolioCalculator';
 
 const router = Router();
 
@@ -49,6 +50,22 @@ router.post('/:groupId/buy', tradeRateLimit(60_000, 20), tradeIdempotency(), asy
     const userId = await getCurrentUserId(req);
 
     // Get user's portfolio
+    const portfolioRef = await prisma.fantasyPortfolio.findUnique({
+      where: {
+        groupId_userId: {
+          groupId,
+          userId,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!portfolioRef) {
+      return res.status(404).json({ error: 'Portfolio not found' });
+    }
+
+    await updatePortfolioTotalValue(portfolioRef.id);
+
     const portfolio = await prisma.fantasyPortfolio.findUnique({
       where: {
         groupId_userId: {
@@ -229,12 +246,14 @@ router.post('/:groupId/buy', tradeRateLimit(60_000, 20), tradeIdempotency(), asy
             newCashBalance: newCashBalance.toNumber(),
             newShares: newShares.toNumber(),
             averageCost: newAverageCost.toNumber(),
+            portfolioId: lockedPortfolio.id,
           };
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
       );
     });
 
+    await updatePortfolioTotalValue(result.portfolioId);
     res.status(201).json(result);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -403,12 +422,14 @@ router.post('/:groupId/sell', tradeRateLimit(60_000, 20), tradeIdempotency(), as
             transaction,
             newCashBalance: newCashBalance.toNumber(),
             remainingShares: newShares.toNumber(),
+            portfolioId: lockedPortfolio.id,
           };
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
       );
     });
 
+    await updatePortfolioTotalValue(result.portfolioId);
     res.status(201).json(result);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -501,11 +522,17 @@ router.get('/:groupId/portfolio/:userId', async (req, res) => {
     });
 
     const cashBalance = new Decimal(portfolio.cashBalance.toString());
-    const totalValue = cashBalance.plus(totalHoldingsValue);
+    const savingsAccount = new Decimal(portfolio.savingsAccount.toString());
+    const bonds = new Decimal(portfolio.bonds.toString());
+    const indexFunds = new Decimal(portfolio.indexFunds.toString());
+    const totalValue = cashBalance.plus(totalHoldingsValue).plus(savingsAccount).plus(bonds).plus(indexFunds);
 
     const formatted = {
       ...portfolio,
       cashBalance: cashBalance.toNumber(),
+      savingsAccount: savingsAccount.toNumber(),
+      bonds: bonds.toNumber(),
+      indexFunds: indexFunds.toNumber(),
       totalHoldingsValue: totalHoldingsValue.toNumber(),
       totalValue: totalValue.toNumber(),
       slots: formattedSlots,

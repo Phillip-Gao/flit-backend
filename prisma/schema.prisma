@@ -270,6 +270,7 @@ model FantasyPortfolio {
   savingsAccount        Decimal @default(0.0)
   bonds                 Decimal @default(0.0)
   indexFunds            Decimal @default(0.0)
+  bondsLockedUntil      DateTime?
 
   // Relationships
   group        Group                       @relation(fields: [groupId], references: [id], onDelete: Cascade)
