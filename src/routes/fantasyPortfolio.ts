@@ -54,6 +54,17 @@ const allocateSchema = z.object({
 
 const BONDS_LOCK_DAYS = 30;
 
+const hasCompetitionStarted = (settings: any): boolean => {
+  if (!settings?.startDate) {
+    return true;
+  }
+  const startDate = new Date(settings.startDate);
+  if (Number.isNaN(startDate.getTime())) {
+    return true;
+  }
+  return new Date() >= startDate;
+};
+
 /**
  * GET /api/fantasy-portfolio - Get current user's portfolios
  * Automatically recalculates portfolio values to ensure they're up-to-date
@@ -453,6 +464,9 @@ router.post('/allocate', async (req, res) => {
     }
 
     const settings = group.settings ? JSON.parse(group.settings) : {};
+    if (!hasCompetitionStarted(settings)) {
+      return res.status(403).json({ error: 'Competition has not started yet' });
+    }
     const classMap: Record<string, string> = {
       savings: 'Savings Account',
       bonds: 'Bonds',

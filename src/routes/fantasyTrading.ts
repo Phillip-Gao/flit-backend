@@ -12,6 +12,17 @@ const router = Router();
 
 router.use(requireAuth);
 
+const hasCompetitionStarted = (settings: any): boolean => {
+  if (!settings?.startDate) {
+    return true;
+  }
+  const startDate = new Date(settings.startDate);
+  if (Number.isNaN(startDate.getTime())) {
+    return true;
+  }
+  return new Date() >= startDate;
+};
+
 async function runSerializableTransaction<T>(work: () => Promise<T>): Promise<T> {
   const maxRetries = 2;
 
@@ -102,6 +113,9 @@ router.post('/:groupId/buy', tradeRateLimit(60_000, 20), tradeIdempotency(), asy
     // Check if trading is enabled
     if (settings.tradingEnabled === false) {
       return res.status(403).json({ error: 'Trading is disabled for this group' });
+    }
+    if (!hasCompetitionStarted(settings)) {
+      return res.status(403).json({ error: 'Competition has not started yet' });
     }
 
     // Check if asset class is allowed
@@ -305,6 +319,9 @@ router.post('/:groupId/sell', tradeRateLimit(60_000, 20), tradeIdempotency(), as
     // Check if trading is enabled
     if (settings.tradingEnabled === false) {
       return res.status(403).json({ error: 'Trading is disabled for this group' });
+    }
+    if (!hasCompetitionStarted(settings)) {
+      return res.status(403).json({ error: 'Competition has not started yet' });
     }
 
     if (settings.enabledAssetClasses && settings.enabledAssetClasses.length > 0) {
