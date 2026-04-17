@@ -542,6 +542,9 @@ router.get('/:groupId/history', async (req, res) => {
       return res.status(404).json({ error: 'Portfolio not found' });
     }
 
+    // Keep persisted total value in sync with latest holdings before building history.
+    const refreshedTotalValue = Number(await updatePortfolioTotalValue(portfolio.id));
+
     // Parse date filters if provided
     let start: Date | undefined;
     let end: Date | undefined;
@@ -581,22 +584,19 @@ router.get('/:groupId/history', async (req, res) => {
       end
     );
 
+    // Get current breakdown from live holdings for an accurate "now" point.
+    const portfolioWithSlots = await prisma.fantasyPortfolio.findUnique({
+      where: { id: portfolio.id },
+      include: { slots: { include: { asset: true } } },
+    });
+    const currentCash = Number(portfolioWithSlots?.cashBalance ?? portfolio.cashBalance);
+    const currentStockValue = portfolioWithSlots?.slots.reduce((sum, slot) =>
+      sum + Number(slot.shares) * Number(slot.asset.currentPrice), 0) || 0;
+    const currentValue = refreshedTotalValue > 0 ? refreshedTotalValue : currentCash + currentStockValue;
+
     // Handle edge case: if we have limited data, add current portfolio state as a data point
     if (history.length === 0) {
       // No snapshots yet - return current portfolio value as single data point
-      const currentCash = Number(portfolio.cashBalance);
-      
-      // Calculate stock value from current holdings
-      const portfolioWithSlots = await prisma.fantasyPortfolio.findUnique({
-        where: { id: portfolio.id },
-        include: { slots: { include: { asset: true } } },
-      });
-      const currentStockValue = portfolioWithSlots?.slots.reduce((sum, slot) => 
-        sum + Number(slot.shares) * Number(slot.asset.currentPrice), 0) || 0;
-      const computedCurrentValue = currentCash + currentStockValue;
-      const persistedTotalValue = Number(portfolio.totalValue);
-      const currentValue = persistedTotalValue > 0 ? persistedTotalValue : computedCurrentValue;
-      
       const initialValue = Number(portfolio.initialValue) > 0 ? Number(portfolio.initialValue) : currentValue;
       const now = new Date();
       
@@ -615,6 +615,29 @@ router.get('/:groupId/history', async (req, res) => {
         nasdaqValue: initialValue * Math.pow(1.12, daysSinceCreation / 365),
         dowValue: initialValue * Math.pow(1.08, daysSinceCreation / 365),
       });
+    } else {
+      const latest = history[history.length - 1];
+      const latestValue = Number(latest.totalValue);
+      const latestTimestamp = new Date(latest.date).getTime();
+      const now = Date.now();
+      const shouldAppendCurrentPoint =
+        Math.abs(latestValue - currentValue) > 0.01 ||
+        now - latestTimestamp > 60 * 60 * 1000;
+
+      if (shouldAppendCurrentPoint && (!end || now <= end.getTime())) {
+        const previousValue = Number.isFinite(latestValue) ? latestValue : currentValue;
+        history.push({
+          date: new Date(now),
+          totalValue: currentValue,
+          cashBalance: currentCash,
+          stockValue: currentStockValue,
+          dayChange: currentValue - previousValue,
+          dayChangePercent: previousValue > 0 ? ((currentValue - previousValue) / previousValue) * 100 : 0,
+          sp500Value: Number(latest.sp500Value) || Number(portfolio.initialValue) || currentValue,
+          nasdaqValue: Number(latest.nasdaqValue) || Number(portfolio.initialValue) || currentValue,
+          dowValue: Number(latest.dowValue) || Number(portfolio.initialValue) || currentValue,
+        });
+      }
     }
 
     res.json({
