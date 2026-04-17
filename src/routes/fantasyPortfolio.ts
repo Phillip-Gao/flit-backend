@@ -444,6 +444,30 @@ router.post('/allocate', async (req, res) => {
       return res.status(404).json({ error: 'Portfolio not found' });
     }
 
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+    });
+
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    const settings = group.settings ? JSON.parse(group.settings) : {};
+    const classMap: Record<string, string> = {
+      savings: 'Savings Account',
+      bonds: 'Bonds',
+      indexFunds: 'Index Funds',
+    };
+    const requiredClass = classMap[assetType];
+    if (
+      requiredClass &&
+      settings.enabledAssetClasses &&
+      settings.enabledAssetClasses.length > 0 &&
+      !settings.enabledAssetClasses.includes(requiredClass)
+    ) {
+      return res.status(403).json({ error: `${requiredClass} is not enabled for this group` });
+    }
+
     // Map asset type to database field name
     const fieldMap: Record<string, keyof typeof portfolio> = {
       savings: 'savingsAccount',

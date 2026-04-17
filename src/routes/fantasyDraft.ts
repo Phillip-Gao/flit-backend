@@ -289,18 +289,19 @@ router.get('/:groupId/draft/assets', async (req, res) => {
 
     const draftedAssetIds = draftState.picks.map((pick) => pick.assetId);
     const settings = JSON.parse(draftState.group.settings || '{}');
+    const stockEnabledForGroup =
+      !settings.enabledAssetClasses ||
+      settings.enabledAssetClasses.length === 0 ||
+      settings.enabledAssetClasses.includes('Stock');
 
     const where: any = {
       id: { notIn: draftedAssetIds },
       isActive: true,
+      type: stockEnabledForGroup ? 'Stock' : { in: [] },
     };
 
-    if (settings.enabledAssetClasses && settings.enabledAssetClasses.length > 0) {
-      where.type = { in: settings.enabledAssetClasses };
-    }
-
     if (type) {
-      where.type = type as string;
+      where.type = stockEnabledForGroup && type === 'Stock' ? 'Stock' : { in: [] };
     }
 
     if (settings.minAssetPrice) {

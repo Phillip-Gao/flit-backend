@@ -106,9 +106,9 @@ router.post('/:groupId/buy', tradeRateLimit(60_000, 20), tradeIdempotency(), asy
 
     // Check if asset class is allowed
     if (settings.enabledAssetClasses && settings.enabledAssetClasses.length > 0) {
-      if (!settings.enabledAssetClasses.includes(asset.type)) {
+      if (!settings.enabledAssetClasses.includes('Stock')) {
         return res.status(403).json({
-          error: `Asset class ${asset.type} is not enabled for this group`
+          error: 'Stock trading is not enabled for this group'
         });
       }
     }
@@ -305,6 +305,12 @@ router.post('/:groupId/sell', tradeRateLimit(60_000, 20), tradeIdempotency(), as
     // Check if trading is enabled
     if (settings.tradingEnabled === false) {
       return res.status(403).json({ error: 'Trading is disabled for this group' });
+    }
+
+    if (settings.enabledAssetClasses && settings.enabledAssetClasses.length > 0) {
+      if (!settings.enabledAssetClasses.includes('Stock')) {
+        return res.status(403).json({ error: 'Stock trading is not enabled for this group' });
+      }
     }
 
     // Get portfolio slot
@@ -568,15 +574,15 @@ router.get('/:groupId/assets', async (req, res) => {
     }
 
     const settings = group.settings ? JSON.parse(group.settings) : {};
+    const stockEnabledForGroup =
+      !settings.enabledAssetClasses ||
+      settings.enabledAssetClasses.length === 0 ||
+      settings.enabledAssetClasses.includes('Stock');
 
     const where: any = {
       isActive: true,
+      type: stockEnabledForGroup ? 'Stock' : { in: [] },
     };
-
-    // Apply group settings filters
-    if (settings.enabledAssetClasses && settings.enabledAssetClasses.length > 0) {
-      where.type = { in: settings.enabledAssetClasses };
-    }
 
     if (settings.minAssetPrice) {
       where.currentPrice = { gte: settings.minAssetPrice };
@@ -584,7 +590,7 @@ router.get('/:groupId/assets', async (req, res) => {
 
     // Apply query filters
     if (type) {
-      where.type = type as string;
+      where.type = stockEnabledForGroup && type === 'Stock' ? 'Stock' : { in: [] };
     }
 
     if (minPrice) {

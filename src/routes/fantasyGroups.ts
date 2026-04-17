@@ -60,7 +60,7 @@ const createGroupSchema = z.object({
     competitionPeriod: z.enum(['1_week', '2_weeks', '1_month', '3_months', '6_months', '1_year']),
     startDate: z.string().datetime(),
     scoringMethod: z.enum(['Total Return %', 'Absolute Gain $']),
-    enabledAssetClasses: z.array(z.enum(['Stock', 'ETF', 'Commodity', 'REIT'])),
+    enabledAssetClasses: z.array(z.enum(['Stock', 'Savings Account', 'Bonds', 'Index Funds'])),
     minAssetPrice: z.number().min(0).default(1),
     allowShortSelling: z.boolean().default(false),
     tradingEnabled: z.boolean().default(true),
@@ -532,9 +532,24 @@ router.post('/:id/start', async (req, res) => {
       return res.status(403).json({ error: 'Only the group admin can start the competition' });
     }
 
-    // Update the group settings to set the start date to now
+    // Enforce start date: admin cannot start the competition early.
     const settings = group.settings ? JSON.parse(group.settings) : {};
-    settings.startDate = new Date().toISOString();
+    const startDate = settings.startDate ? new Date(settings.startDate) : null;
+    const now = new Date();
+
+    if (!startDate || Number.isNaN(startDate.getTime())) {
+      return res.status(400).json({ error: 'Group start date is invalid' });
+    }
+
+    if (now < startDate) {
+      return res.status(400).json({
+        error: 'Competition cannot start yet',
+        message: `Competition can only be started on or after ${startDate.toISOString()}.`,
+        startDate: startDate.toISOString(),
+      });
+    }
+
+    settings.startedByAdminAt = now.toISOString();
 
     await prisma.group.update({
       where: { id },
@@ -545,7 +560,7 @@ router.post('/:id/start', async (req, res) => {
 
     res.json({
       message: 'Competition started successfully',
-      startDate: settings.startDate,
+      startDate: startDate.toISOString(),
     });
   } catch (error) {
     console.error('Error starting competition:', error);
@@ -821,7 +836,7 @@ router.get('/tournaments/active', async (req, res) => {
         startDate: firstDayOfMonth.toISOString(),
         endDate: lastDayOfMonth.toISOString(),
         scoringMethod: 'Total Return %',
-        enabledAssetClasses: ['Stock', 'ETF', 'Commodity', 'REIT'],
+        enabledAssetClasses: ['Stock', 'Savings Account', 'Bonds', 'Index Funds'],
         minAssetPrice: 1,
         allowShortSelling: false,
         tradingEnabled: true,
